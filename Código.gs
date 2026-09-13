@@ -4,7 +4,9 @@
 function onOpen() {
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('✏️ Termos')
-    .addItem('🛑 Cientificação de Recurso', 'iniciarGeracaoRecursos') // NOVO ITEM ADICIONADO
+    .addItem('🛑 Cientificação de Recurso', 'iniciarGeracaoRecursos')
+    .addSeparator()
+    .addItem('📄 Registrar Mensagem (PDF)', 'processarMensagemPDF')
     .addToUi();
 }
 
@@ -177,124 +179,6 @@ function mostrarAlertaGenerico(titulo, mensagem) {
 }
 
 
-// =========================================================================
-// GERAÇÃO DE TERMOS DE CIENTIFICAÇÃO EM LOTE (PDF ÚNICO)
-// =========================================================================
-
-function iniciarGeracaoTermos() {
-  var htmlTemplate = HtmlService.createTemplateFromFile('Alerta');
-  htmlTemplate.titulo = 'Gerar Termos de Cientificação';
-  htmlTemplate.mensagem = 'Deseja gerar os Termos de Cientificação para todos os candidatos da aba "Dados Pessoais"?';
-  htmlTemplate.tipo = 'termos_confirmacao';
-  
-  var htmlOutput = htmlTemplate.evaluate().setWidth(500).setHeight(400).setTitle('Inspeção de Saúde');
-  SpreadsheetApp.getUi().showModalDialog(htmlOutput, ' ');
-}
-
-function processarGeracaoTermos() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  try {
-    var abaPrincipal = ss.getSheetByName('Principal');
-    var abaDadosPessoais = ss.getSheetByName('Dados Pessoais');
-    
-    var nomeConcursoBruto = abaPrincipal.getRange('F3').getValue() || "NÃO INFORMADO";
-    var nomeConcurso = String(nomeConcursoBruto).replace(/CONCURSO\s+/i, '');
-
-    var dadosPrincipal = abaPrincipal.getRange('A12:C' + abaPrincipal.getLastRow()).getValues();
-    var mapaDatas = {};
-    for (var i = 0; i < dadosPrincipal.length; i++) {
-      var data = dadosPrincipal[i][0]; 
-      var insc = String(dadosPrincipal[i][2]).trim(); 
-      if (insc) mapaDatas[insc] = formatarDataSimples(data);
-    }
-
-    var dadosPessoais = abaDadosPessoais.getDataRange().getValues();
-    var cabecalhoDP = dadosPessoais[0];
-    
-    var idxInsc = cabecalhoDP.indexOf("Inscrição");
-    var idxNome = cabecalhoDP.indexOf("Nome");
-    var idxId = cabecalhoDP.indexOf("Identidade");
-    var idxEmissor = cabecalhoDP.indexOf("Emissor");
-
-    if (idxInsc === -1 || idxNome === -1) {
-      mostrarAlertaGenerico("Erro", "Colunas 'Inscrição' ou 'Nome' não encontradas na aba 'Dados Pessoais'.");
-      return;
-    }
-
-    var idTemplate = '1uSdvvwxjPDkvGm7kjCrDGaGnPVF3_pDu4rN6C6tJFiI';
-    var tempFile = DriveApp.getFileById(idTemplate).makeCopy("Temp_Termos_" + new Date().getTime());
-    
-    var docTemp = DocumentApp.openById(tempFile.getId());
-    var bodyTemp = docTemp.getBody();
-    
-    var docTemplate = DocumentApp.openById(idTemplate);
-    var bodyTemplate = docTemplate.getBody();
-    
-    var candidatosProcessados = 0;
-    var primeiroCandidato = true;
-
-    for (var r = 1; r < dadosPessoais.length; r++) {
-      var linha = dadosPessoais[r];
-      var candInsc = String(linha[idxInsc]).trim();
-      
-      if (!candInsc) continue; 
-      
-      var candNome = linha[idxNome];
-      var candId = linha[idxId];
-      var candEmissor = linha[idxEmissor];
-      var candData = mapaDatas[candInsc] || "___/___/_____"; 
-      
-      if (!primeiroCandidato) {
-        bodyTemp.appendPageBreak();
-        for (var j = 0; j < bodyTemplate.getNumChildren(); j++) {
-          var elemento = bodyTemplate.getChild(j).copy();
-          var tipo = elemento.getType();
-          if (tipo === DocumentApp.ElementType.PARAGRAPH) bodyTemp.appendParagraph(elemento);
-          else if (tipo === DocumentApp.ElementType.TABLE) bodyTemp.appendTable(elemento);
-          else if (tipo === DocumentApp.ElementType.LIST_ITEM) bodyTemp.appendListItem(elemento);
-        }
-      }
-
-      bodyTemp.replaceText("\\{\\{Nome\\}\\}", candNome);
-      bodyTemp.replaceText("\\{\\{Concurso\\}\\}", nomeConcurso);
-      bodyTemp.replaceText("\\{\\{Inscrição\\}\\}", candInsc);
-      bodyTemp.replaceText("\\{\\{Identidade\\}\\}", candId);
-      bodyTemp.replaceText("\\{\\{Emissor\\}\\}", candEmissor);
-      bodyTemp.replaceText("\\{\\{Data\\}\\}", candData);
-
-      primeiroCandidato = false;
-      candidatosProcessados++;
-    }
-
-    docTemp.saveAndClose(); 
-
-    if (candidatosProcessados === 0) {
-      tempFile.setTrashed(true);
-      mostrarAlertaGenerico("Aviso", "Nenhum candidato válido encontrado.");
-      return;
-    }
-
-    var idPastaDestino = '1BC4YZRU-vS7C-0826QRJprlRb9ITiN39';
-    var pastaDestino = DriveApp.getFolderById(idPastaDestino);
-    
-    var nomeArquivoFinal = "Termos Cientificacao " + nomeConcurso + ".pdf";
-    var pdfBlob = tempFile.getAs("application/pdf");
-    pdfBlob.setName(nomeArquivoFinal);
-    
-    var novoPdf = pastaDestino.createFile(pdfBlob);
-    var urlArquivo = novoPdf.getUrl();
-
-    tempFile.setTrashed(true);
-
-    var mensagemSucesso = 'O ficheiro PDF com ' + candidatosProcessados + ' termos foi gerado e salvo com sucesso!<br><br><b>Documento:</b> <a href="' + urlArquivo + '" target="_blank">' + nomeArquivoFinal + '</a><br><br><i>Clique no link acima para abrir o ficheiro.</i>';
-    mostrarAlertaGenerico("Processo Concluído", mensagemSucesso);
-
-  } catch (erro) {
-    mostrarAlertaGenerico("Erro", "Ocorreu um erro ao gerar os termos: <br><br>" + erro.message);
-  }
-}
-
 /**
  * Função auxiliar para formatar a data normal (ex: 25/03/2026) para os Termos
  */
@@ -425,4 +309,260 @@ function processarGeracaoRecursos() {
   } catch (erro) {
     mostrarAlertaGenerico("Erro", "Ocorreu um erro ao processar os recursos: <br><br>" + erro.message);
   }
+}
+
+
+// =========================================================================
+// LEITURA DE MENSAGEM ADMINISTRATIVA (PDF) E EXTRAÇÃO DE DADOS
+// =========================================================================
+
+/**
+ * 1. Pede ao usuário o link/ID do PDF da mensagem administrativa (SIGAD-MB)
+ *    já salvo no Google Drive e dispara o processamento.
+ */
+function processarMensagemPDF() {
+  var ui = SpreadsheetApp.getUi();
+  var resposta = ui.prompt(
+    'Registrar Mensagem (PDF)',
+    'Cole o link (URL) ou o ID do arquivo PDF da mensagem administrativa, já salvo no Google Drive:',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (resposta.getSelectedButton() !== ui.Button.OK) return;
+
+  var entrada = resposta.getResponseText().trim();
+  if (!entrada) {
+    mostrarAlertaGenerico('Aviso', 'Nenhum link ou ID informado.');
+    return;
+  }
+
+  var fileId = extrairIdDrive(entrada);
+  if (!fileId) {
+    mostrarAlertaGenerico('Erro', 'Não foi possível identificar o ID do arquivo a partir do valor informado.');
+    return;
+  }
+
+  try {
+    var arquivoPdf = DriveApp.getFileById(fileId);
+    var textoMensagem = extrairTextoPdf(arquivoPdf);
+    var dadosMsg = extrairCabecalhoMensagem(textoMensagem);
+
+    if (!dadosMsg.dataHora) {
+      mostrarAlertaGenerico('Erro', 'Não foi possível localizar o código Data-Hora (ID único) da mensagem no PDF.');
+      return;
+    }
+
+    var candidatos = extrairCandidatos(dadosMsg.texto || textoMensagem);
+
+    if (candidatos.length === 0) {
+      mostrarAlertaGenerico('Aviso', 'Mensagem "' + dadosMsg.dataHora + '" registrada, mas nenhum candidato foi identificado no texto.');
+    }
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var novosExaminee = candidatos.length ? gravarExaminee(ss, candidatos) : 0;
+    var novosDataBase = candidatos.length ? gravarExamineeDataBase(ss, candidatos) : 0;
+    gravarMensagem(ss, dadosMsg, arquivoPdf.getUrl());
+
+    var msgFinal = 'Mensagem <b>' + dadosMsg.dataHora + '</b> processada com sucesso!<br><br>' +
+      '<b>Candidatos identificados:</b> ' + candidatos.length + '<br>' +
+      '<b>Novos em "examinee":</b> ' + novosExaminee + '<br>' +
+      '<b>Novos em "examineedataBase":</b> ' + novosDataBase + '<br>' +
+      '<b>Registro criado em "messages":</b> Sim';
+
+    mostrarAlertaGenerico('Processo Concluído', msgFinal);
+
+  } catch (erro) {
+    mostrarAlertaGenerico('Erro', 'Ocorreu um erro ao processar a mensagem: <br><br>' + erro.message);
+  }
+}
+
+/**
+ * Extrai o ID de um arquivo do Drive a partir de uma URL colada ou do próprio ID.
+ */
+function extrairIdDrive(valor) {
+  var padroes = [
+    /\/d\/([a-zA-Z0-9_-]{15,})/,
+    /[?&]id=([a-zA-Z0-9_-]{15,})/
+  ];
+  for (var i = 0; i < padroes.length; i++) {
+    var m = valor.match(padroes[i]);
+    if (m) return m[1];
+  }
+  if (/^[a-zA-Z0-9_-]{15,}$/.test(valor)) return valor;
+  return null;
+}
+
+/**
+ * Converte o PDF para Google Docs (com OCR) via serviço avançado Drive
+ * apenas para extrair o texto, e depois descarta a cópia temporária.
+ * Requer o serviço avançado "Drive" (v2) habilitado no appsscript.json.
+ */
+function extrairTextoPdf(arquivoPdf) {
+  var blob = arquivoPdf.getBlob();
+  var recurso = {
+    title: 'OCR_TEMP_' + new Date().getTime(),
+    mimeType: MimeType.GOOGLE_DOCS
+  };
+
+  var arquivoConvertido = Drive.Files.insert(recurso, blob, { ocr: true, ocrLanguage: 'pt' });
+
+  try {
+    var doc = DocumentApp.openById(arquivoConvertido.id);
+    return doc.getBody().getText();
+  } finally {
+    DriveApp.getFileById(arquivoConvertido.id).setTrashed(true);
+  }
+}
+
+/**
+ * Extrai os campos do cabeçalho da mensagem SIGAD-MB (Data-Hora, De, Para,
+ * Info, Assunto e o corpo do Texto).
+ */
+function extrairCabecalhoMensagem(texto) {
+  var extrair = function(padrao) {
+    var m = texto.match(padrao);
+    return m ? m[1].trim() : '';
+  };
+
+  var dataHora = extrair(/Data-Hora\s*[\r\n]+\s*([^\r\n]+)/i);
+  var sender = extrair(/\bDe:\s*([^\r\n]+)/i);
+  var recipient = extrair(/\bPara:\s*([^\r\n]+)/i);
+  var info = extrair(/\bInfo:\s*([^\r\n]+)/i);
+  var subject = extrair(/\bAssunto:\s*([^\r\n]+)/i);
+
+  var mTexto = texto.match(/\bTexto:\s*([\s\S]*?)(?:\r?\n\s*Tr[âa]mite:|\r?\n\s*Prazo para Transmiss|$)/i);
+  var corpoTexto = mTexto ? mTexto[1].trim() : '';
+
+  var purpose = /candidatos\s+abaixo\s+relacionados/i.test(corpoTexto)
+    ? 'Apresentação de Candidatos - Inspeção de Saúde'
+    : 'Outros';
+
+  return {
+    dataHora: dataHora,
+    sender: sender,
+    recipient: recipient,
+    info: info,
+    subject: subject,
+    texto: corpoTexto,
+    purpose: purpose
+  };
+}
+
+/**
+ * Extrai a lista de candidatos do corpo da mensagem: itens em lista não
+ * enumerada, precedidos por matrícula no formato 000000-0.
+ */
+function extrairCandidatos(texto) {
+  var inicio = texto.search(/candidatos\s+abaixo\s+relacionados/i);
+  var fim = texto.search(/\bDOIS\s*[-–—]/i);
+  var trecho = texto.substring(
+    inicio >= 0 ? inicio : 0,
+    fim >= 0 ? fim : texto.length
+  );
+
+  var candidatos = [];
+  var regexItem = /(\d{6}-\d)\s+([^\r\n]+)/g;
+  var m;
+
+  while ((m = regexItem.exec(trecho)) !== null) {
+    var id = m[1];
+    var nome = m[2]
+      .replace(/;\s*e\s*$/i, '')
+      .replace(/[;.]\s*$/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (nome) candidatos.push({ id: id, nome: nome });
+  }
+
+  return candidatos;
+}
+
+/**
+ * Grava novos candidatos na aba "examinee" (colunas ID e examinee),
+ * ignorando IDs já existentes.
+ */
+function gravarExaminee(ss, candidatos) {
+  var aba = ss.getSheetByName('examinee');
+  if (!aba) throw new Error('Aba "examinee" não encontrada.');
+
+  var idsExistentes = coletarIdsExistentes(aba);
+  var novasLinhas = [];
+
+  candidatos.forEach(function(c) {
+    if (!idsExistentes[c.id]) {
+      novasLinhas.push([c.id, c.nome]);
+      idsExistentes[c.id] = true;
+    }
+  });
+
+  if (novasLinhas.length > 0) {
+    aba.getRange(aba.getLastRow() + 1, 1, novasLinhas.length, 2).setValues(novasLinhas);
+  }
+  return novasLinhas.length;
+}
+
+/**
+ * Grava os IDs dos novos candidatos na primeira coluna da aba
+ * "examineedataBase", ignorando IDs já existentes.
+ */
+function gravarExamineeDataBase(ss, candidatos) {
+  var aba = ss.getSheetByName('examineedataBase');
+  if (!aba) throw new Error('Aba "examineedataBase" não encontrada.');
+
+  var idsExistentes = coletarIdsExistentes(aba);
+  var novosIds = [];
+
+  candidatos.forEach(function(c) {
+    if (!idsExistentes[c.id]) {
+      novosIds.push([c.id]);
+      idsExistentes[c.id] = true;
+    }
+  });
+
+  if (novosIds.length > 0) {
+    aba.getRange(aba.getLastRow() + 1, 1, novosIds.length, 1).setValues(novosIds);
+  }
+  return novosIds.length;
+}
+
+/**
+ * Insere o registro da mensagem na primeira linha de dados da aba
+ * "messages" (logo abaixo do cabeçalho), usando a Data-Hora como ID único.
+ */
+function gravarMensagem(ss, dadosMsg, urlArquivo) {
+  var aba = ss.getSheetByName('messages');
+  if (!aba) throw new Error('Aba "messages" não encontrada.');
+
+  var idsExistentes = coletarIdsExistentes(aba);
+  if (idsExistentes[dadosMsg.dataHora]) {
+    throw new Error('Já existe uma mensagem registrada com o ID "' + dadosMsg.dataHora + '".');
+  }
+
+  aba.insertRowBefore(2);
+  aba.getRange(2, 1, 1, 8).setValues([[
+    dadosMsg.dataHora,
+    urlArquivo,
+    dadosMsg.purpose,
+    dadosMsg.sender,
+    dadosMsg.recipient,
+    dadosMsg.info,
+    dadosMsg.subject,
+    dadosMsg.texto
+  ]]);
+}
+
+/**
+ * Utilitário: retorna um mapa {id: true} com os IDs já presentes na
+ * coluna A de uma aba (a partir da linha 2).
+ */
+function coletarIdsExistentes(aba) {
+  var mapa = {};
+  var ultimaLinha = aba.getLastRow();
+  if (ultimaLinha >= 2) {
+    aba.getRange(2, 1, ultimaLinha - 1, 1).getValues().forEach(function(linha) {
+      var id = String(linha[0]).trim();
+      if (id) mapa[id] = true;
+    });
+  }
+  return mapa;
 }
