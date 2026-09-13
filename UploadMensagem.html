@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Carlito:wght@400;700&family=Montserrat:wght@700&display=swap" rel="stylesheet">
+
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Carlito', sans-serif;
+      color: #333;
+      background-color: #f4f6f8;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      text-align: center;
+    }
+
+    .bold-title {
+      font-family: 'Montserrat', sans-serif;
+      font-weight: 700;
+    }
+
+    .header {
+      background-color: #050f41;
+      padding: 20px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+
+    .header img {
+      max-height: 95px;
+    }
+
+    .content-container {
+      flex: 1;
+      padding: 25px 20px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      overflow-y: auto;
+    }
+
+    .titulo {
+      font-family: 'Montserrat', sans-serif;
+      font-weight: 700;
+      color: #050f41;
+      font-size: 20px;
+      margin-top: 0;
+      margin-bottom: 10px;
+    }
+
+    .subtitulo {
+      font-size: 14px;
+      color: #666;
+      margin: 0 0 20px 0;
+    }
+
+    .dropzone {
+      border: 2px dashed #050f41;
+      border-radius: 10px;
+      padding: 30px 15px;
+      cursor: pointer;
+      transition: background-color 0.2s, border-color 0.2s;
+    }
+
+    .dropzone:hover,
+    .dropzone.arrastando {
+      background-color: #eef0f9;
+      border-color: #fab932;
+    }
+
+    .dropzone svg {
+      stroke: #050f41;
+      margin-bottom: 10px;
+    }
+
+    .dropzone-texto {
+      font-size: 15px;
+      color: #333;
+    }
+
+    .dropzone-texto small {
+      display: block;
+      color: #888;
+      margin-top: 4px;
+    }
+
+    .arquivo-selecionado {
+      margin-top: 15px;
+      font-size: 14px;
+      color: #1a7e44;
+      font-weight: bold;
+      word-break: break-word;
+    }
+
+    .mensagem-resultado {
+      font-size: 15px;
+      color: #333;
+      line-height: 1.6;
+      text-align: left;
+      background-color: #fff;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 18px;
+    }
+
+    .mensagem-resultado a {
+      color: #050f41;
+      font-weight: bold;
+    }
+
+    .footer-actions {
+      padding: 15px 20px;
+      background-color: #fff;
+      border-top: 1px solid #ddd;
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+    }
+
+    .btn {
+      font-family: 'Montserrat', sans-serif;
+      font-weight: 700;
+      padding: 10px 25px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 15px;
+      transition: opacity 0.2s;
+    }
+
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn:hover:not(:disabled) { opacity: 0.8; }
+    .btn-primary { background-color: #050f41; color: #fff; }
+    .btn-secondary { background-color: #e0e0e0; color: #333; }
+
+    #input-arquivo { display: none; }
+
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <img src="https://i.imgur.com/nZ3c8JO.png" alt="Logo Marinha">
+  </div>
+
+  <div class="content-container">
+
+    <div id="tela-upload">
+      <h2 class="titulo">Registrar Mensagem (PDF)</h2>
+      <p class="subtitulo">Envie o PDF da mensagem administrativa (SIGAD-MB) recebida.</p>
+
+      <div class="dropzone" id="dropzone" onclick="document.getElementById('input-arquivo').click()">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+        <div class="dropzone-texto">
+          Clique para selecionar o PDF<br>ou arraste o arquivo aqui
+          <small>Apenas arquivos .pdf</small>
+        </div>
+        <div class="arquivo-selecionado" id="nome-arquivo"></div>
+      </div>
+
+      <input type="file" id="input-arquivo" accept="application/pdf,.pdf">
+    </div>
+
+    <div id="tela-resultado" hidden>
+      <h2 class="titulo" id="titulo-resultado">Processando...</h2>
+      <div class="mensagem-resultado" id="texto-resultado"></div>
+    </div>
+
+  </div>
+
+  <div class="footer-actions" id="acoes-upload">
+    <button class="btn btn-secondary" onclick="google.script.host.close()">Cancelar</button>
+    <button class="btn btn-primary" id="btn-enviar" onclick="enviarArquivo()" disabled>Enviar e Processar</button>
+  </div>
+
+  <div class="footer-actions" id="acoes-resultado" hidden>
+    <button class="btn btn-primary" onclick="google.script.host.close()">OK, Fechar</button>
+  </div>
+
+  <script>
+    var arquivoSelecionado = null;
+    var inputArquivo = document.getElementById('input-arquivo');
+    var dropzone = document.getElementById('dropzone');
+    var btnEnviar = document.getElementById('btn-enviar');
+
+    function definirArquivo(arquivo) {
+      if (!arquivo) return;
+      if (arquivo.type !== 'application/pdf' && !/\.pdf$/i.test(arquivo.name)) {
+        alert('Por favor, selecione um arquivo PDF.');
+        return;
+      }
+      arquivoSelecionado = arquivo;
+      document.getElementById('nome-arquivo').innerText = arquivo.name;
+      btnEnviar.disabled = false;
+    }
+
+    inputArquivo.addEventListener('change', function(e) {
+      definirArquivo(e.target.files[0]);
+    });
+
+    dropzone.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      dropzone.classList.add('arrastando');
+    });
+
+    dropzone.addEventListener('dragleave', function() {
+      dropzone.classList.remove('arrastando');
+    });
+
+    dropzone.addEventListener('drop', function(e) {
+      e.preventDefault();
+      dropzone.classList.remove('arrastando');
+      if (e.dataTransfer.files.length > 0) {
+        definirArquivo(e.dataTransfer.files[0]);
+      }
+    });
+
+    function enviarArquivo() {
+      if (!arquivoSelecionado) return;
+
+      btnEnviar.disabled = true;
+      btnEnviar.innerText = 'Enviando...';
+
+      var leitor = new FileReader();
+      leitor.onload = function() {
+        var base64Data = leitor.result.split(',')[1];
+
+        document.getElementById('tela-upload').hidden = true;
+        document.getElementById('acoes-upload').hidden = true;
+        document.getElementById('tela-resultado').hidden = false;
+        document.getElementById('titulo-resultado').innerText = 'Processando...';
+        document.getElementById('texto-resultado').innerHTML = 'A extrair e gravar os dados da mensagem.<br>Isto pode levar alguns instantes. Por favor, não feche esta janela.';
+
+        google.script.run
+          .withSuccessHandler(mostrarSucesso)
+          .withFailureHandler(mostrarErro)
+          .processarMensagemPDFUpload(base64Data, arquivoSelecionado.name, arquivoSelecionado.type || 'application/pdf');
+      };
+      leitor.onerror = function() {
+        alert('Não foi possível ler o arquivo selecionado.');
+        btnEnviar.disabled = false;
+        btnEnviar.innerText = 'Enviar e Processar';
+      };
+      leitor.readAsDataURL(arquivoSelecionado);
+    }
+
+    function mostrarSucesso(mensagemHtml) {
+      document.getElementById('titulo-resultado').innerText = 'Processo Concluído';
+      document.getElementById('texto-resultado').innerHTML = mensagemHtml;
+      document.getElementById('acoes-resultado').hidden = false;
+    }
+
+    function mostrarErro(erro) {
+      document.getElementById('titulo-resultado').innerText = 'Erro';
+      document.getElementById('texto-resultado').innerHTML = erro.message || String(erro);
+      document.getElementById('acoes-resultado').hidden = false;
+    }
+  </script>
+</body>
+</html>

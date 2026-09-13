@@ -6,7 +6,7 @@ function onOpen() {
   ui.createMenu('✏️ Termos')
     .addItem('🛑 Cientificação de Recurso', 'iniciarGeracaoRecursos')
     .addSeparator()
-    .addItem('📄 Registrar Mensagem (PDF)', 'processarMensagemPDF')
+    .addItem('📄 Registrar Mensagem (PDF)', 'iniciarUploadMensagem')
     .addToUi();
 }
 
@@ -317,92 +317,95 @@ function processarGeracaoRecursos() {
 // =========================================================================
 
 /**
- * 1. Pede ao usuário o link/ID do PDF da mensagem administrativa (SIGAD-MB)
- *    já salvo no Google Drive e dispara o processamento.
+ * 1. Abre o modal de upload direto do PDF da mensagem administrativa (SIGAD-MB).
  */
-function processarMensagemPDF() {
-  var ui = SpreadsheetApp.getUi();
-  var resposta = ui.prompt(
-    'Registrar Mensagem (PDF)',
-    'Cole o link (URL) ou o ID do arquivo PDF da mensagem administrativa, já salvo no Google Drive:',
-    ui.ButtonSet.OK_CANCEL
-  );
+function iniciarUploadMensagem() {
+  var htmlOutput = HtmlService.createHtmlOutputFromFile('UploadMensagem')
+    .setWidth(550)
+    .setHeight(480)
+    .setTitle('Inspeção de Saúde - Marinha do Brasil');
 
-  if (resposta.getSelectedButton() !== ui.Button.OK) return;
-
-  var entrada = resposta.getResponseText().trim();
-  if (!entrada) {
-    mostrarAlertaGenerico('Aviso', 'Nenhum link ou ID informado.');
-    return;
-  }
-
-  var fileId = extrairIdDrive(entrada);
-  if (!fileId) {
-    mostrarAlertaGenerico('Erro', 'Não foi possível identificar o ID do arquivo a partir do valor informado.');
-    return;
-  }
-
-  try {
-    var arquivoPdf = DriveApp.getFileById(fileId);
-    var textoMensagem = extrairTextoPdf(arquivoPdf);
-    var dadosMsg = extrairCabecalhoMensagem(textoMensagem);
-
-    if (!dadosMsg.dataHora) {
-      mostrarAlertaGenerico('Erro', 'Não foi possível localizar o código Data-Hora (ID único) da mensagem no PDF.');
-      return;
-    }
-
-    var candidatos = extrairCandidatos(dadosMsg.texto || textoMensagem);
-
-    if (candidatos.length === 0) {
-      mostrarAlertaGenerico('Aviso', 'Mensagem "' + dadosMsg.dataHora + '" registrada, mas nenhum candidato foi identificado no texto.');
-    }
-
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var novosExaminee = candidatos.length ? gravarExaminee(ss, candidatos) : 0;
-    var novosDataBase = candidatos.length ? gravarExamineeDataBase(ss, candidatos) : 0;
-    gravarMensagem(ss, dadosMsg, arquivoPdf.getUrl());
-
-    var periodoJRS = extrairPeriodoJRS(dadosMsg.texto || textoMensagem);
-    var infoDatas;
-    if (periodoJRS) {
-      var diasUteis = calcularDiasUteis(periodoJRS.inicio, periodoJRS.fim);
-      var novasDatas = gravarDatasAgendamento(ss, diasUteis);
-      infoDatas = diasUteis.length + ' dias úteis identificados entre ' +
-        formatarDataSimples(periodoJRS.inicio) + ' e ' + formatarDataSimples(periodoJRS.fim) +
-        ' (' + novasDatas + ' novos em "schedulingDates")';
-    } else {
-      infoDatas = 'Período de agendamento (JRS) não identificado no texto da mensagem.';
-    }
-
-    var msgFinal = 'Mensagem <b>' + dadosMsg.dataHora + '</b> processada com sucesso!<br><br>' +
-      '<b>Candidatos identificados:</b> ' + candidatos.length + '<br>' +
-      '<b>Novos em "examinee":</b> ' + novosExaminee + '<br>' +
-      '<b>Novos em "examineedataBase":</b> ' + novosDataBase + '<br>' +
-      '<b>Registro criado em "messages":</b> Sim<br>' +
-      '<b>Datas de agendamento (JRS):</b> ' + infoDatas;
-
-    mostrarAlertaGenerico('Processo Concluído', msgFinal);
-
-  } catch (erro) {
-    mostrarAlertaGenerico('Erro', 'Ocorreu um erro ao processar a mensagem: <br><br>' + erro.message);
-  }
+  SpreadsheetApp.getUi().showModalDialog(htmlOutput, ' ');
 }
 
 /**
- * Extrai o ID de um arquivo do Drive a partir de uma URL colada ou do próprio ID.
+ * 2. Recebe o PDF enviado pelo modal (conteúdo em base64), salva na pasta
+ *    "Mensagens" (na mesma pasta da planilha) e dispara o processamento.
+ *    Chamada via google.script.run a partir de UploadMensagem.html.
  */
-function extrairIdDrive(valor) {
-  var padroes = [
-    /\/d\/([a-zA-Z0-9_-]{15,})/,
-    /[?&]id=([a-zA-Z0-9_-]{15,})/
-  ];
-  for (var i = 0; i < padroes.length; i++) {
-    var m = valor.match(padroes[i]);
-    if (m) return m[1];
+function processarMensagemPDFUpload(base64Data, nomeArquivo, mimeType) {
+  if (!base64Data) {
+    throw new Error('Nenhum arquivo foi recebido.');
   }
-  if (/^[a-zA-Z0-9_-]{15,}$/.test(valor)) return valor;
-  return null;
+
+  var bytes = Utilities.base64Decode(base64Data);
+  var blob = Utilities.newBlob(bytes, mimeType || 'application/pdf', nomeArquivo || ('mensagem_' + new Date().getTime() + '.pdf'));
+
+  var pastaMensagens = obterPastaMensagens();
+  var arquivoPdf = pastaMensagens.createFile(blob);
+
+  return processarArquivoMensagem(arquivoPdf);
+}
+
+/**
+ * Retorna (criando se necessário) a subpasta "Mensagens" na mesma pasta
+ * onde está a planilha, para guardar os PDFs enviados via upload.
+ */
+function obterPastaMensagens() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var arquivoPlanilha = DriveApp.getFileById(ss.getId());
+  var pais = arquivoPlanilha.getParents();
+  var pastaPai = pais.hasNext() ? pais.next() : DriveApp.getRootFolder();
+
+  var subPastas = pastaPai.getFoldersByName('Mensagens');
+  if (subPastas.hasNext()) return subPastas.next();
+
+  return pastaPai.createFolder('Mensagens');
+}
+
+/**
+ * Núcleo do processamento: recebe o arquivo PDF já salvo no Drive, extrai
+ * o texto, o cabeçalho, os candidatos e o período de agendamento da JRS, e
+ * grava tudo nas abas correspondentes. Retorna uma mensagem HTML de resultado.
+ */
+function processarArquivoMensagem(arquivoPdf) {
+  var textoMensagem = extrairTextoPdf(arquivoPdf);
+  var dadosMsg = extrairCabecalhoMensagem(textoMensagem);
+
+  if (!dadosMsg.dataHora) {
+    throw new Error('Não foi possível localizar o código Data-Hora (ID único) da mensagem no PDF.');
+  }
+
+  var candidatos = extrairCandidatos(dadosMsg.texto || textoMensagem);
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var novosExaminee = candidatos.length ? gravarExaminee(ss, candidatos) : 0;
+  var novosDataBase = candidatos.length ? gravarExamineeDataBase(ss, candidatos) : 0;
+  gravarMensagem(ss, dadosMsg, arquivoPdf.getUrl());
+
+  var periodoJRS = extrairPeriodoJRS(dadosMsg.texto || textoMensagem);
+  var infoDatas;
+  if (periodoJRS) {
+    var diasUteis = calcularDiasUteis(periodoJRS.inicio, periodoJRS.fim);
+    var novasDatas = gravarDatasAgendamento(ss, diasUteis);
+    infoDatas = diasUteis.length + ' dias úteis identificados entre ' +
+      formatarDataSimples(periodoJRS.inicio) + ' e ' + formatarDataSimples(periodoJRS.fim) +
+      ' (' + novasDatas + ' novos em "schedulingDates")';
+  } else {
+    infoDatas = 'Período de agendamento (JRS) não identificado no texto da mensagem.';
+  }
+
+  var avisoCandidatos = candidatos.length === 0
+    ? '<br><br><i>Nenhum candidato foi identificado no texto da mensagem.</i>'
+    : '';
+
+  return 'Mensagem <b>' + dadosMsg.dataHora + '</b> processada com sucesso!<br><br>' +
+    '<b>Candidatos identificados:</b> ' + candidatos.length + '<br>' +
+    '<b>Novos em "examinee":</b> ' + novosExaminee + '<br>' +
+    '<b>Novos em "examineedataBase":</b> ' + novosDataBase + '<br>' +
+    '<b>Registro criado em "messages":</b> Sim<br>' +
+    '<b>Datas de agendamento (JRS):</b> ' + infoDatas +
+    avisoCandidatos;
 }
 
 /**
