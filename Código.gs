@@ -369,7 +369,7 @@ function obterPastaMensagens() {
  * grava tudo nas abas correspondentes. Retorna uma mensagem HTML de resultado.
  */
 function processarArquivoMensagem(arquivoPdf) {
-  var textoMensagem = extrairTextoPdf(arquivoPdf);
+  var textoMensagem = limparRuidoPaginacao(extrairTextoPdf(arquivoPdf));
   var dadosMsg = extrairCabecalhoMensagem(textoMensagem);
 
   if (!dadosMsg.dataHora) {
@@ -431,6 +431,24 @@ function extrairTextoPdf(arquivoPdf) {
 }
 
 /**
+ * Remove ruído de paginação do texto extraído do PDF: a marca d'água
+ * repetida "HNRe - 02.2" e os rodapés "Página X de Y", que aparecem como
+ * texto real embutido nas quebras de página (não apenas elementos visuais)
+ * e acabam intercalados no meio do corpo da mensagem e da lista de
+ * candidatos. Também normaliza espaços/quebras de linha resultantes.
+ */
+function limparRuidoPaginacao(texto) {
+  var limpo = texto
+    .replace(/HNRe\s*-?\s*0?2\.2/gi, ' ')
+    .replace(/P[áa]gina\s+\d+\s+de\s+\d+/gi, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/[ \t]*\n[ \t]*/g, '\n')
+    .replace(/\n{3,}/g, '\n\n');
+
+  return limpo.trim();
+}
+
+/**
  * Extrai os campos do cabeçalho da mensagem SIGAD-MB (Data-Hora, De, Para,
  * Info, Assunto e o corpo do Texto).
  */
@@ -467,6 +485,12 @@ function extrairCabecalhoMensagem(texto) {
 /**
  * Extrai a lista de candidatos do corpo da mensagem: itens em lista não
  * enumerada, precedidos por matrícula no formato 000000-0.
+ *
+ * A lista costuma vir diagramada em colunas (duas ou mais por página), o
+ * que faz com que, no texto extraído, mais de um candidato às vezes caia
+ * na mesma linha física. Por isso o corte de cada item NÃO usa fim de
+ * linha como delimitador: ele sempre para no próximo código de matrícula
+ * (\d{6}-\d) encontrado, esteja ele na mesma linha ou não.
  */
 function extrairCandidatos(texto) {
   var inicio = texto.search(/candidatos\s+abaixo\s+relacionados/i);
@@ -477,15 +501,18 @@ function extrairCandidatos(texto) {
   );
 
   var candidatos = [];
-  var regexItem = /(\d{6}-\d)\s+([^\r\n]+)/g;
+  var regexItem = /(\d{6}-\d)\s+([\s\S]+?)(?=\d{6}-\d|$)/g;
   var m;
 
   while ((m = regexItem.exec(trecho)) !== null) {
     var id = m[1];
     var nome = m[2]
-      .replace(/;\s*e\s*$/i, '')
-      .replace(/[;.]\s*$/, '')
       .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/-\s*$/, '')
+      .trim()
+      .replace(/;\s*e$/i, '')
+      .replace(/[;.]$/, '')
       .trim();
     if (nome) candidatos.push({ id: id, nome: nome });
   }
