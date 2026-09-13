@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Carlito:wght@400;700&family=Montserrat:wght@700&display=swap" rel="stylesheet">
+  
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Carlito', sans-serif;
+      background-color: #f4f6f8;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      text-align: center;
+    }
+
+    .header {
+      background-color: #050f41;
+      padding: 20px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .header img {
+      max-height: 95px; 
+    }
+
+    .content-container {
+      flex: 1;
+      padding: 30px 20px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .titulo {
+      font-family: 'Montserrat', sans-serif;
+      font-weight: 700;
+      color: #050f41;
+      font-size: 22px;
+      margin-top: 0;
+      margin-bottom: 15px;
+    }
+
+    .mensagem {
+      font-size: 18px;
+      color: #333;
+      line-height: 1.5;
+      margin: 0;
+    }
+    
+    .mensagem a {
+      color: #050f41;
+      font-weight: bold;
+      text-decoration: underline;
+    }
+    .mensagem a:hover {
+      opacity: 0.8;
+    }
+
+    .footer-actions {
+      padding: 15px 20px;
+      background-color: #fff;
+      border-top: 1px solid #ddd;
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+    }
+
+    .btn {
+      font-family: 'Montserrat', sans-serif;
+      font-weight: 700;
+      padding: 10px 25px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 15px;
+      transition: opacity 0.2s;
+    }
+
+    .btn:hover { opacity: 0.8; }
+    .btn-primary { background-color: #050f41; color: #fff; }
+    .btn-secondary { background-color: #e0e0e0; color: #333; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <img src="https://i.imgur.com/nZ3c8JO.png" alt="Logo Marinha">
+  </div>
+
+  <div class="content-container">
+    <h2 class="titulo"><?= titulo ?></h2>
+    <p class="mensagem" id="texto-mensagem"><?!= mensagem ?></p>
+  </div>
+
+  <div class="footer-actions">
+    <? if (tipo === 'confirmacao') { ?>
+      <button class="btn btn-secondary" onclick="google.script.host.close()">Não</button>
+      <button class="btn btn-primary" id="btn-sim" onclick="avancarMinuta()">Sim, gerar minuta</button>
+      
+    <? } else if (tipo === 'termos_confirmacao') { ?>
+      <button class="btn btn-secondary" onclick="google.script.host.close()">Não</button>
+      <button class="btn btn-primary" id="btn-sim-termos" onclick="avancarTermos()">Sim, gerar PDFs</button>
+      
+    <? } else if (tipo === 'recurso_confirmacao') { ?>
+      <button class="btn btn-secondary" onclick="google.script.host.close()">Não</button>
+      <button class="btn btn-primary" id="btn-sim-recursos" onclick="avancarRecursos()">Sim, processar Recursos</button>
+
+    <? } else { ?>
+      <button class="btn btn-primary" onclick="google.script.host.close()">OK, Fechar</button>
+    <? } ?>
+  </div>
+
+  <script>
+    function avancarMinuta() {
+      var btn = document.getElementById('btn-sim');
+      btn.disabled = true;
+      btn.innerText = "Processando...";
+      btn.style.opacity = "0.7";
+      google.script.run.abrirModal(); 
+    }
+
+    function avancarTermos() {
+      var btn = document.getElementById('btn-sim-termos');
+      btn.disabled = true;
+      btn.innerText = "Processando...";
+      btn.style.opacity = "0.7";
+      document.getElementById('texto-mensagem').innerHTML = "<b>A processar...</b><br>Isto pode levar alguns minutos.<br>Por favor, não feche esta janela.";
+      google.script.run.processarGeracaoTermos();
+    }
+
+    function avancarRecursos() {
+      var btn = document.getElementById('btn-sim-recursos');
+      btn.disabled = true;
+      btn.innerText = "Verificando...";
+      btn.style.opacity = "0.7";
+      document.getElementById('texto-mensagem').innerHTML = "<b>A verificar e a processar os Termos de Recurso...</b><br>Isto pode levar alguns minutos.<br>Por favor, não feche esta janela.";
+      google.script.run.processarGeracaoRecursos();
+    }
+  </script>
+</body>
+</html>
