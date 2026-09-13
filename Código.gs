@@ -411,16 +411,16 @@ function processarArquivoMensagem(arquivoPdf) {
 /**
  * Converte o PDF para Google Docs (com OCR) via serviço avançado Drive
  * apenas para extrair o texto, e depois descarta a cópia temporária.
- * Requer o serviço avançado "Drive" (v2) habilitado no appsscript.json.
+ * Requer o serviço avançado "Drive" (API v3) habilitado no appsscript.json.
  */
 function extrairTextoPdf(arquivoPdf) {
   var blob = arquivoPdf.getBlob();
   var recurso = {
-    title: 'OCR_TEMP_' + new Date().getTime(),
+    name: 'OCR_TEMP_' + new Date().getTime(),
     mimeType: MimeType.GOOGLE_DOCS
   };
 
-  var arquivoConvertido = Drive.Files.insert(recurso, blob, { ocr: true, ocrLanguage: 'pt' });
+  var arquivoConvertido = Drive.Files.create(recurso, blob, { ocrLanguage: 'pt' });
 
   try {
     var doc = DocumentApp.openById(arquivoConvertido.id);

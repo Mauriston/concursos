@@ -4,11 +4,21 @@
     "enabledAdvancedServices": [
       {
         "userSymbol": "Drive",
-        "serviceId": "drive",
-        "version": "v2"
+        "version": "v3",
+        "serviceId": "drive"
+      },
+      {
+        "userSymbol": "Docs",
+        "version": "v1",
+        "serviceId": "docs"
+      },
+      {
+        "userSymbol": "Sheets",
+        "version": "v4",
+        "serviceId": "sheets"
       }
     ]
   },
-  "exceptionLogging": "STACKDRIVER_SIG",
+  "exceptionLogging": "STACKDRIVER",
   "runtimeVersion": "V8"
 }
