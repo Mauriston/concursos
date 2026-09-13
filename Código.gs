@@ -363,11 +363,24 @@ function processarMensagemPDF() {
     var novosDataBase = candidatos.length ? gravarExamineeDataBase(ss, candidatos) : 0;
     gravarMensagem(ss, dadosMsg, arquivoPdf.getUrl());
 
+    var periodoJRS = extrairPeriodoJRS(dadosMsg.texto || textoMensagem);
+    var infoDatas;
+    if (periodoJRS) {
+      var diasUteis = calcularDiasUteis(periodoJRS.inicio, periodoJRS.fim);
+      var novasDatas = gravarDatasAgendamento(ss, diasUteis);
+      infoDatas = diasUteis.length + ' dias úteis identificados entre ' +
+        formatarDataSimples(periodoJRS.inicio) + ' e ' + formatarDataSimples(periodoJRS.fim) +
+        ' (' + novasDatas + ' novos em "schedulingDates")';
+    } else {
+      infoDatas = 'Período de agendamento (JRS) não identificado no texto da mensagem.';
+    }
+
     var msgFinal = 'Mensagem <b>' + dadosMsg.dataHora + '</b> processada com sucesso!<br><br>' +
       '<b>Candidatos identificados:</b> ' + candidatos.length + '<br>' +
       '<b>Novos em "examinee":</b> ' + novosExaminee + '<br>' +
       '<b>Novos em "examineedataBase":</b> ' + novosDataBase + '<br>' +
-      '<b>Registro criado em "messages":</b> Sim';
+      '<b>Registro criado em "messages":</b> Sim<br>' +
+      '<b>Datas de agendamento (JRS):</b> ' + infoDatas;
 
     mostrarAlertaGenerico('Processo Concluído', msgFinal);
 
@@ -434,7 +447,7 @@ function extrairCabecalhoMensagem(texto) {
   var corpoTexto = mTexto ? mTexto[1].trim() : '';
 
   var purpose = /candidatos\s+abaixo\s+relacionados/i.test(corpoTexto)
-    ? 'Apresentação de Candidatos - Inspeção de Saúde'
+    ? 'Apresentação e IS'
     : 'Outros';
 
   return {
@@ -565,4 +578,205 @@ function coletarIdsExistentes(aba) {
     });
   }
   return mapa;
+}
+
+
+// =========================================================================
+// DATAS DE AGENDAMENTO (schedulingDates): PERÍODO JRS, DIAS ÚTEIS E FERIADOS
+// =========================================================================
+
+/**
+ * Extrai o período de agendamento da JRS no texto da mensagem, no padrão
+ * "03AGO a 14SET2026 (JRS)". O ano do início é opcional no texto; quando
+ * ausente, assume-se o mesmo ano do fim do período.
+ */
+function extrairPeriodoJRS(texto) {
+  var meses = {
+    'JAN': 0, 'FEV': 1, 'MAR': 2, 'ABR': 3, 'MAI': 4, 'JUN': 5,
+    'JUL': 6, 'AGO': 7, 'SET': 8, 'OUT': 9, 'NOV': 10, 'DEZ': 11
+  };
+
+  var regex = /(\d{1,2})\s*([A-ZÇ]{3})\s*(\d{4})?\s*a\s*(\d{1,2})\s*([A-ZÇ]{3})\s*(\d{4})\s*\(\s*JRS\s*\)/i;
+  var m = texto.match(regex);
+  if (!m) return null;
+
+  var mesIni = meses[m[2].toUpperCase()];
+  var mesFim = meses[m[5].toUpperCase()];
+  if (mesIni === undefined || mesFim === undefined) return null;
+
+  var diaIni = parseInt(m[1], 10);
+  var diaFim = parseInt(m[4], 10);
+  var anoFim = parseInt(m[6], 10);
+  var anoIni = m[3] ? parseInt(m[3], 10) : anoFim;
+
+  return {
+    inicio: new Date(anoIni, mesIni, diaIni),
+    fim: new Date(anoFim, mesFim, diaFim)
+  };
+}
+
+/**
+ * Calcula a data da Páscoa (Domingo) para um determinado ano, pelo
+ * algoritmo Anônimo Gregoriano (Meeus/Jones/Butcher).
+ */
+function calcularPascoa(ano) {
+  var a = ano % 19;
+  var b = Math.floor(ano / 100);
+  var c = ano % 100;
+  var d = Math.floor(b / 4);
+  var e = b % 4;
+  var f = Math.floor((b + 8) / 25);
+  var g = Math.floor((b - f + 1) / 3);
+  var h = (19 * a + b - d - g + 15) % 30;
+  var i = Math.floor(c / 4);
+  var k = c % 4;
+  var l = (32 + 2 * e + 2 * i - h - k) % 7;
+  var m = Math.floor((a + 11 * h + 22 * l) / 451);
+  var mes = Math.floor((h + l - 7 * m + 114) / 31); // 3 = Março, 4 = Abril
+  var dia = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(ano, mes - 1, dia);
+}
+
+/**
+ * Retorna a lista de feriados nacionais de um ano, incluindo os feriados
+ * fixos e os móveis calculados a partir da Páscoa (Carnaval, Quarta-feira
+ * de Cinzas, Sexta-feira Santa e Corpus Christi).
+ */
+function obterFeriadosNacionais(ano) {
+  var feriados = [];
+
+  var somarDias = function(data, dias) {
+    var d = new Date(data.getTime());
+    d.setDate(d.getDate() + dias);
+    return d;
+  };
+
+  var fixos = [
+    [0, 1],   // 01/01 - Confraternização Universal
+    [3, 21],  // 21/04 - Tiradentes
+    [4, 1],   // 01/05 - Dia do Trabalho
+    [8, 7],   // 07/09 - Independência do Brasil
+    [9, 12],  // 12/10 - Nossa Senhora Aparecida
+    [10, 2],  // 02/11 - Finados
+    [10, 15], // 15/11 - Proclamação da República
+    [10, 20], // 20/11 - Dia Nacional de Zumbi e da Consciência Negra
+    [11, 25]  // 25/12 - Natal
+  ];
+  fixos.forEach(function(f) {
+    feriados.push(new Date(ano, f[0], f[1]));
+  });
+
+  var pascoa = calcularPascoa(ano);
+  feriados.push(somarDias(pascoa, -48)); // Carnaval (segunda-feira)
+  feriados.push(somarDias(pascoa, -47)); // Carnaval (terça-feira)
+  feriados.push(somarDias(pascoa, -46)); // Quarta-feira de Cinzas
+  feriados.push(somarDias(pascoa, -2));  // Sexta-feira Santa
+  feriados.push(pascoa);                 // Domingo de Páscoa
+  feriados.push(somarDias(pascoa, 60));  // Corpus Christi
+
+  return feriados;
+}
+
+/**
+ * Formata uma data como chave "AAAA-MM-DD", independente de fuso horário.
+ */
+function formatarChaveData(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+/**
+ * Calcula os dias úteis (segunda a sexta) entre duas datas (inclusive),
+ * excluindo os feriados nacionais (fixos e móveis) do(s) ano(s) do período.
+ */
+function calcularDiasUteis(dataInicial, dataFinal) {
+  var dias = [];
+  var mapaFeriadosPorAno = {};
+
+  var atual = new Date(dataInicial.getFullYear(), dataInicial.getMonth(), dataInicial.getDate());
+  var fim = new Date(dataFinal.getFullYear(), dataFinal.getMonth(), dataFinal.getDate());
+
+  while (atual.getTime() <= fim.getTime()) {
+    var ano = atual.getFullYear();
+    if (!mapaFeriadosPorAno[ano]) {
+      mapaFeriadosPorAno[ano] = {};
+      obterFeriadosNacionais(ano).forEach(function(d) {
+        mapaFeriadosPorAno[ano][formatarChaveData(d)] = true;
+      });
+    }
+
+    var diaSemana = atual.getDay(); // 0 = Domingo, 6 = Sábado
+    var eFeriado = !!mapaFeriadosPorAno[ano][formatarChaveData(atual)];
+
+    if (diaSemana !== 0 && diaSemana !== 6 && !eFeriado) {
+      dias.push(new Date(atual.getTime()));
+    }
+
+    atual.setDate(atual.getDate() + 1);
+  }
+
+  return dias;
+}
+
+/**
+ * Grava as datas úteis calculadas na aba "schedulingDates" (coluna A),
+ * preservando o status "active" (coluna C) de datas já existentes e sem
+ * duplicar datas. Garante também a fórmula MAP+LAMBDA da coluna B (weekDay).
+ */
+function gravarDatasAgendamento(ss, diasUteis) {
+  var aba = ss.getSheetByName('schedulingDates');
+  if (!aba) throw new Error('Aba "schedulingDates" não encontrada.');
+
+  var ultimaLinha = aba.getLastRow();
+  var mapaAtivo = {};
+
+  if (ultimaLinha >= 2) {
+    aba.getRange(2, 1, ultimaLinha - 1, 3).getValues().forEach(function(linha) {
+      var data = linha[0];
+      if (data instanceof Date && !isNaN(data.getTime())) {
+        mapaAtivo[formatarChaveData(data)] = linha[2] === true;
+      }
+    });
+  }
+
+  var totalAntes = Object.keys(mapaAtivo).length;
+
+  diasUteis.forEach(function(d) {
+    var chave = formatarChaveData(d);
+    if (!(chave in mapaAtivo)) mapaAtivo[chave] = false;
+  });
+
+  var chaves = Object.keys(mapaAtivo).sort();
+
+  if (ultimaLinha >= 2) {
+    aba.getRange(2, 1, ultimaLinha - 1, 1).clearContent();
+    aba.getRange(2, 3, ultimaLinha - 1, 1).clearContent();
+  }
+
+  if (chaves.length > 0) {
+    var linhasData = chaves.map(function(chave) {
+      var p = chave.split('-');
+      return [new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]))];
+    });
+    var linhasAtivo = chaves.map(function(chave) {
+      return [mapaAtivo[chave]];
+    });
+
+    aba.getRange(2, 1, linhasData.length, 1).setValues(linhasData);
+    aba.getRange(2, 3, linhasAtivo.length, 1).setValues(linhasAtivo);
+  }
+
+  garantirFormulaWeekDay(aba);
+
+  return chaves.length - totalAntes;
+}
+
+/**
+ * Garante que a coluna B (weekDay) tenha a fórmula MAP+LAMBDA que calcula
+ * o dia da semana de cada data preenchida na coluna A.
+ */
+function garantirFormulaWeekDay(aba) {
+  var celula = aba.getRange('B2');
+  if (!celula.getFormula()) {
+    celula.setFormula('=MAP(A2:A, LAMBDA(d, IF(d="", "", WEEKDAY(d))))');
+  }
 }
