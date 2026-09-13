@@ -101,10 +101,6 @@
       <button class="btn btn-secondary" onclick="google.script.host.close()">Não</button>
       <button class="btn btn-primary" id="btn-sim" onclick="avancarMinuta()">Sim, gerar minuta</button>
       
-    <? } else if (tipo === 'termos_confirmacao') { ?>
-      <button class="btn btn-secondary" onclick="google.script.host.close()">Não</button>
-      <button class="btn btn-primary" id="btn-sim-termos" onclick="avancarTermos()">Sim, gerar PDFs</button>
-      
     <? } else if (tipo === 'recurso_confirmacao') { ?>
       <button class="btn btn-secondary" onclick="google.script.host.close()">Não</button>
       <button class="btn btn-primary" id="btn-sim-recursos" onclick="avancarRecursos()">Sim, processar Recursos</button>
@@ -121,15 +117,6 @@
       btn.innerText = "Processando...";
       btn.style.opacity = "0.7";
       google.script.run.abrirModal(); 
-    }
-
-    function avancarTermos() {
-      var btn = document.getElementById('btn-sim-termos');
-      btn.disabled = true;
-      btn.innerText = "Processando...";
-      btn.style.opacity = "0.7";
-      document.getElementById('texto-mensagem').innerHTML = "<b>A processar...</b><br>Isto pode levar alguns minutos.<br>Por favor, não feche esta janela.";
-      google.script.run.processarGeracaoTermos();
     }
 
     function avancarRecursos() {

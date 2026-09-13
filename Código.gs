@@ -4,7 +4,9 @@
 function onOpen() {
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('✏️ Termos')
-    .addItem('🛑 Cientificação de Recurso', 'iniciarGeracaoRecursos') // NOVO ITEM ADICIONADO
+    .addItem('🛑 Cientificação de Recurso', 'iniciarGeracaoRecursos')
+    .addSeparator()
+    .addItem('📄 Registrar Mensagem (PDF)', 'processarMensagemPDF')
     .addToUi();
 }
 
@@ -177,124 +179,6 @@ function mostrarAlertaGenerico(titulo, mensagem) {
 }
 
 
-// =========================================================================
-// GERAÇÃO DE TERMOS DE CIENTIFICAÇÃO EM LOTE (PDF ÚNICO)
-// =========================================================================
-
-function iniciarGeracaoTermos() {
-  var htmlTemplate = HtmlService.createTemplateFromFile('Alerta');
-  htmlTemplate.titulo = 'Gerar Termos de Cientificação';
-  htmlTemplate.mensagem = 'Deseja gerar os Termos de Cientificação para todos os candidatos da aba "Dados Pessoais"?';
-  htmlTemplate.tipo = 'termos_confirmacao';
-  
-  var htmlOutput = htmlTemplate.evaluate().setWidth(500).setHeight(400).setTitle('Inspeção de Saúde');
-  SpreadsheetApp.getUi().showModalDialog(htmlOutput, ' ');
-}
-
-function processarGeracaoTermos() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  try {
-    var abaPrincipal = ss.getSheetByName('Principal');
-    var abaDadosPessoais = ss.getSheetByName('Dados Pessoais');
-    
-    var nomeConcursoBruto = abaPrincipal.getRange('F3').getValue() || "NÃO INFORMADO";
-    var nomeConcurso = String(nomeConcursoBruto).replace(/CONCURSO\s+/i, '');
-
-    var dadosPrincipal = abaPrincipal.getRange('A12:C' + abaPrincipal.getLastRow()).getValues();
-    var mapaDatas = {};
-    for (var i = 0; i < dadosPrincipal.length; i++) {
-      var data = dadosPrincipal[i][0]; 
-      var insc = String(dadosPrincipal[i][2]).trim(); 
-      if (insc) mapaDatas[insc] = formatarDataSimples(data);
-    }
-
-    var dadosPessoais = abaDadosPessoais.getDataRange().getValues();
-    var cabecalhoDP = dadosPessoais[0];
-    
-    var idxInsc = cabecalhoDP.indexOf("Inscrição");
-    var idxNome = cabecalhoDP.indexOf("Nome");
-    var idxId = cabecalhoDP.indexOf("Identidade");
-    var idxEmissor = cabecalhoDP.indexOf("Emissor");
-
-    if (idxInsc === -1 || idxNome === -1) {
-      mostrarAlertaGenerico("Erro", "Colunas 'Inscrição' ou 'Nome' não encontradas na aba 'Dados Pessoais'.");
-      return;
-    }
-
-    var idTemplate = '1uSdvvwxjPDkvGm7kjCrDGaGnPVF3_pDu4rN6C6tJFiI';
-    var tempFile = DriveApp.getFileById(idTemplate).makeCopy("Temp_Termos_" + new Date().getTime());
-    
-    var docTemp = DocumentApp.openById(tempFile.getId());
-    var bodyTemp = docTemp.getBody();
-    
-    var docTemplate = DocumentApp.openById(idTemplate);
-    var bodyTemplate = docTemplate.getBody();
-    
-    var candidatosProcessados = 0;
-    var primeiroCandidato = true;
-
-    for (var r = 1; r < dadosPessoais.length; r++) {
-      var linha = dadosPessoais[r];
-      var candInsc = String(linha[idxInsc]).trim();
-      
-      if (!candInsc) continue; 
-      
-      var candNome = linha[idxNome];
-      var candId = linha[idxId];
-      var candEmissor = linha[idxEmissor];
-      var candData = mapaDatas[candInsc] || "___/___/_____"; 
-      
-      if (!primeiroCandidato) {
-        bodyTemp.appendPageBreak();
-        for (var j = 0; j < bodyTemplate.getNumChildren(); j++) {
-          var elemento = bodyTemplate.getChild(j).copy();
-          var tipo = elemento.getType();
-          if (tipo === DocumentApp.ElementType.PARAGRAPH) bodyTemp.appendParagraph(elemento);
-          else if (tipo === DocumentApp.ElementType.TABLE) bodyTemp.appendTable(elemento);
-          else if (tipo === DocumentApp.ElementType.LIST_ITEM) bodyTemp.appendListItem(elemento);
-        }
-      }
-
-      bodyTemp.replaceText("\\{\\{Nome\\}\\}", candNome);
-      bodyTemp.replaceText("\\{\\{Concurso\\}\\}", nomeConcurso);
-      bodyTemp.replaceText("\\{\\{Inscrição\\}\\}", candInsc);
-      bodyTemp.replaceText("\\{\\{Identidade\\}\\}", candId);
-      bodyTemp.replaceText("\\{\\{Emissor\\}\\}", candEmissor);
-      bodyTemp.replaceText("\\{\\{Data\\}\\}", candData);
-
-      primeiroCandidato = false;
-      candidatosProcessados++;
-    }
-
-    docTemp.saveAndClose(); 
-
-    if (candidatosProcessados === 0) {
-      tempFile.setTrashed(true);
-      mostrarAlertaGenerico("Aviso", "Nenhum candidato válido encontrado.");
-      return;
-    }
-
-    var idPastaDestino = '1BC4YZRU-vS7C-0826QRJprlRb9ITiN39';
-    var pastaDestino = DriveApp.getFolderById(idPastaDestino);
-    
-    var nomeArquivoFinal = "Termos Cientificacao " + nomeConcurso + ".pdf";
-    var pdfBlob = tempFile.getAs("application/pdf");
-    pdfBlob.setName(nomeArquivoFinal);
-    
-    var novoPdf = pastaDestino.createFile(pdfBlob);
-    var urlArquivo = novoPdf.getUrl();
-
-    tempFile.setTrashed(true);
-
-    var mensagemSucesso = 'O ficheiro PDF com ' + candidatosProcessados + ' termos foi gerado e salvo com sucesso!<br><br><b>Documento:</b> <a href="' + urlArquivo + '" target="_blank">' + nomeArquivoFinal + '</a><br><br><i>Clique no link acima para abrir o ficheiro.</i>';
-    mostrarAlertaGenerico("Processo Concluído", mensagemSucesso);
-
-  } catch (erro) {
-    mostrarAlertaGenerico("Erro", "Ocorreu um erro ao gerar os termos: <br><br>" + erro.message);
-  }
-}
-
 /**
  * Função auxiliar para formatar a data normal (ex: 25/03/2026) para os Termos
  */
@@ -424,5 +308,475 @@ function processarGeracaoRecursos() {
 
   } catch (erro) {
     mostrarAlertaGenerico("Erro", "Ocorreu um erro ao processar os recursos: <br><br>" + erro.message);
+  }
+}
+
+
+// =========================================================================
+// LEITURA DE MENSAGEM ADMINISTRATIVA (PDF) E EXTRAÇÃO DE DADOS
+// =========================================================================
+
+/**
+ * 1. Pede ao usuário o link/ID do PDF da mensagem administrativa (SIGAD-MB)
+ *    já salvo no Google Drive e dispara o processamento.
+ */
+function processarMensagemPDF() {
+  var ui = SpreadsheetApp.getUi();
+  var resposta = ui.prompt(
+    'Registrar Mensagem (PDF)',
+    'Cole o link (URL) ou o ID do arquivo PDF da mensagem administrativa, já salvo no Google Drive:',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (resposta.getSelectedButton() !== ui.Button.OK) return;
+
+  var entrada = resposta.getResponseText().trim();
+  if (!entrada) {
+    mostrarAlertaGenerico('Aviso', 'Nenhum link ou ID informado.');
+    return;
+  }
+
+  var fileId = extrairIdDrive(entrada);
+  if (!fileId) {
+    mostrarAlertaGenerico('Erro', 'Não foi possível identificar o ID do arquivo a partir do valor informado.');
+    return;
+  }
+
+  try {
+    var arquivoPdf = DriveApp.getFileById(fileId);
+    var textoMensagem = extrairTextoPdf(arquivoPdf);
+    var dadosMsg = extrairCabecalhoMensagem(textoMensagem);
+
+    if (!dadosMsg.dataHora) {
+      mostrarAlertaGenerico('Erro', 'Não foi possível localizar o código Data-Hora (ID único) da mensagem no PDF.');
+      return;
+    }
+
+    var candidatos = extrairCandidatos(dadosMsg.texto || textoMensagem);
+
+    if (candidatos.length === 0) {
+      mostrarAlertaGenerico('Aviso', 'Mensagem "' + dadosMsg.dataHora + '" registrada, mas nenhum candidato foi identificado no texto.');
+    }
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var novosExaminee = candidatos.length ? gravarExaminee(ss, candidatos) : 0;
+    var novosDataBase = candidatos.length ? gravarExamineeDataBase(ss, candidatos) : 0;
+    gravarMensagem(ss, dadosMsg, arquivoPdf.getUrl());
+
+    var periodoJRS = extrairPeriodoJRS(dadosMsg.texto || textoMensagem);
+    var infoDatas;
+    if (periodoJRS) {
+      var diasUteis = calcularDiasUteis(periodoJRS.inicio, periodoJRS.fim);
+      var novasDatas = gravarDatasAgendamento(ss, diasUteis);
+      infoDatas = diasUteis.length + ' dias úteis identificados entre ' +
+        formatarDataSimples(periodoJRS.inicio) + ' e ' + formatarDataSimples(periodoJRS.fim) +
+        ' (' + novasDatas + ' novos em "schedulingDates")';
+    } else {
+      infoDatas = 'Período de agendamento (JRS) não identificado no texto da mensagem.';
+    }
+
+    var msgFinal = 'Mensagem <b>' + dadosMsg.dataHora + '</b> processada com sucesso!<br><br>' +
+      '<b>Candidatos identificados:</b> ' + candidatos.length + '<br>' +
+      '<b>Novos em "examinee":</b> ' + novosExaminee + '<br>' +
+      '<b>Novos em "examineedataBase":</b> ' + novosDataBase + '<br>' +
+      '<b>Registro criado em "messages":</b> Sim<br>' +
+      '<b>Datas de agendamento (JRS):</b> ' + infoDatas;
+
+    mostrarAlertaGenerico('Processo Concluído', msgFinal);
+
+  } catch (erro) {
+    mostrarAlertaGenerico('Erro', 'Ocorreu um erro ao processar a mensagem: <br><br>' + erro.message);
+  }
+}
+
+/**
+ * Extrai o ID de um arquivo do Drive a partir de uma URL colada ou do próprio ID.
+ */
+function extrairIdDrive(valor) {
+  var padroes = [
+    /\/d\/([a-zA-Z0-9_-]{15,})/,
+    /[?&]id=([a-zA-Z0-9_-]{15,})/
+  ];
+  for (var i = 0; i < padroes.length; i++) {
+    var m = valor.match(padroes[i]);
+    if (m) return m[1];
+  }
+  if (/^[a-zA-Z0-9_-]{15,}$/.test(valor)) return valor;
+  return null;
+}
+
+/**
+ * Converte o PDF para Google Docs (com OCR) via serviço avançado Drive
+ * apenas para extrair o texto, e depois descarta a cópia temporária.
+ * Requer o serviço avançado "Drive" (v2) habilitado no appsscript.json.
+ */
+function extrairTextoPdf(arquivoPdf) {
+  var blob = arquivoPdf.getBlob();
+  var recurso = {
+    title: 'OCR_TEMP_' + new Date().getTime(),
+    mimeType: MimeType.GOOGLE_DOCS
+  };
+
+  var arquivoConvertido = Drive.Files.insert(recurso, blob, { ocr: true, ocrLanguage: 'pt' });
+
+  try {
+    var doc = DocumentApp.openById(arquivoConvertido.id);
+    return doc.getBody().getText();
+  } finally {
+    DriveApp.getFileById(arquivoConvertido.id).setTrashed(true);
+  }
+}
+
+/**
+ * Extrai os campos do cabeçalho da mensagem SIGAD-MB (Data-Hora, De, Para,
+ * Info, Assunto e o corpo do Texto).
+ */
+function extrairCabecalhoMensagem(texto) {
+  var extrair = function(padrao) {
+    var m = texto.match(padrao);
+    return m ? m[1].trim() : '';
+  };
+
+  var dataHora = extrair(/Data-Hora\s*[\r\n]+\s*([^\r\n]+)/i);
+  var sender = extrair(/\bDe:\s*([^\r\n]+)/i);
+  var recipient = extrair(/\bPara:\s*([^\r\n]+)/i);
+  var info = extrair(/\bInfo:\s*([^\r\n]+)/i);
+  var subject = extrair(/\bAssunto:\s*([^\r\n]+)/i);
+
+  var mTexto = texto.match(/\bTexto:\s*([\s\S]*?)(?:\r?\n\s*Tr[âa]mite:|\r?\n\s*Prazo para Transmiss|$)/i);
+  var corpoTexto = mTexto ? mTexto[1].trim() : '';
+
+  var purpose = /candidatos\s+abaixo\s+relacionados/i.test(corpoTexto)
+    ? 'Apresentação e IS'
+    : 'Outros';
+
+  return {
+    dataHora: dataHora,
+    sender: sender,
+    recipient: recipient,
+    info: info,
+    subject: subject,
+    texto: corpoTexto,
+    purpose: purpose
+  };
+}
+
+/**
+ * Extrai a lista de candidatos do corpo da mensagem: itens em lista não
+ * enumerada, precedidos por matrícula no formato 000000-0.
+ */
+function extrairCandidatos(texto) {
+  var inicio = texto.search(/candidatos\s+abaixo\s+relacionados/i);
+  var fim = texto.search(/\bDOIS\s*[-–—]/i);
+  var trecho = texto.substring(
+    inicio >= 0 ? inicio : 0,
+    fim >= 0 ? fim : texto.length
+  );
+
+  var candidatos = [];
+  var regexItem = /(\d{6}-\d)\s+([^\r\n]+)/g;
+  var m;
+
+  while ((m = regexItem.exec(trecho)) !== null) {
+    var id = m[1];
+    var nome = m[2]
+      .replace(/;\s*e\s*$/i, '')
+      .replace(/[;.]\s*$/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (nome) candidatos.push({ id: id, nome: nome });
+  }
+
+  return candidatos;
+}
+
+/**
+ * Grava novos candidatos na aba "examinee" (colunas ID e examinee),
+ * ignorando IDs já existentes.
+ */
+function gravarExaminee(ss, candidatos) {
+  var aba = ss.getSheetByName('examinee');
+  if (!aba) throw new Error('Aba "examinee" não encontrada.');
+
+  var idsExistentes = coletarIdsExistentes(aba);
+  var novasLinhas = [];
+
+  candidatos.forEach(function(c) {
+    if (!idsExistentes[c.id]) {
+      novasLinhas.push([c.id, c.nome]);
+      idsExistentes[c.id] = true;
+    }
+  });
+
+  if (novasLinhas.length > 0) {
+    aba.getRange(aba.getLastRow() + 1, 1, novasLinhas.length, 2).setValues(novasLinhas);
+  }
+  return novasLinhas.length;
+}
+
+/**
+ * Grava os IDs dos novos candidatos na primeira coluna da aba
+ * "examineedataBase", ignorando IDs já existentes.
+ */
+function gravarExamineeDataBase(ss, candidatos) {
+  var aba = ss.getSheetByName('examineedataBase');
+  if (!aba) throw new Error('Aba "examineedataBase" não encontrada.');
+
+  var idsExistentes = coletarIdsExistentes(aba);
+  var novosIds = [];
+
+  candidatos.forEach(function(c) {
+    if (!idsExistentes[c.id]) {
+      novosIds.push([c.id]);
+      idsExistentes[c.id] = true;
+    }
+  });
+
+  if (novosIds.length > 0) {
+    aba.getRange(aba.getLastRow() + 1, 1, novosIds.length, 1).setValues(novosIds);
+  }
+  return novosIds.length;
+}
+
+/**
+ * Insere o registro da mensagem na primeira linha de dados da aba
+ * "messages" (logo abaixo do cabeçalho), usando a Data-Hora como ID único.
+ */
+function gravarMensagem(ss, dadosMsg, urlArquivo) {
+  var aba = ss.getSheetByName('messages');
+  if (!aba) throw new Error('Aba "messages" não encontrada.');
+
+  var idsExistentes = coletarIdsExistentes(aba);
+  if (idsExistentes[dadosMsg.dataHora]) {
+    throw new Error('Já existe uma mensagem registrada com o ID "' + dadosMsg.dataHora + '".');
+  }
+
+  aba.insertRowBefore(2);
+  aba.getRange(2, 1, 1, 8).setValues([[
+    dadosMsg.dataHora,
+    urlArquivo,
+    dadosMsg.purpose,
+    dadosMsg.sender,
+    dadosMsg.recipient,
+    dadosMsg.info,
+    dadosMsg.subject,
+    dadosMsg.texto
+  ]]);
+}
+
+/**
+ * Utilitário: retorna um mapa {id: true} com os IDs já presentes na
+ * coluna A de uma aba (a partir da linha 2).
+ */
+function coletarIdsExistentes(aba) {
+  var mapa = {};
+  var ultimaLinha = aba.getLastRow();
+  if (ultimaLinha >= 2) {
+    aba.getRange(2, 1, ultimaLinha - 1, 1).getValues().forEach(function(linha) {
+      var id = String(linha[0]).trim();
+      if (id) mapa[id] = true;
+    });
+  }
+  return mapa;
+}
+
+
+// =========================================================================
+// DATAS DE AGENDAMENTO (schedulingDates): PERÍODO JRS, DIAS ÚTEIS E FERIADOS
+// =========================================================================
+
+/**
+ * Extrai o período de agendamento da JRS no texto da mensagem, no padrão
+ * "03AGO a 14SET2026 (JRS)". O ano do início é opcional no texto; quando
+ * ausente, assume-se o mesmo ano do fim do período.
+ */
+function extrairPeriodoJRS(texto) {
+  var meses = {
+    'JAN': 0, 'FEV': 1, 'MAR': 2, 'ABR': 3, 'MAI': 4, 'JUN': 5,
+    'JUL': 6, 'AGO': 7, 'SET': 8, 'OUT': 9, 'NOV': 10, 'DEZ': 11
+  };
+
+  var regex = /(\d{1,2})\s*([A-ZÇ]{3})\s*(\d{4})?\s*a\s*(\d{1,2})\s*([A-ZÇ]{3})\s*(\d{4})\s*\(\s*JRS\s*\)/i;
+  var m = texto.match(regex);
+  if (!m) return null;
+
+  var mesIni = meses[m[2].toUpperCase()];
+  var mesFim = meses[m[5].toUpperCase()];
+  if (mesIni === undefined || mesFim === undefined) return null;
+
+  var diaIni = parseInt(m[1], 10);
+  var diaFim = parseInt(m[4], 10);
+  var anoFim = parseInt(m[6], 10);
+  var anoIni = m[3] ? parseInt(m[3], 10) : anoFim;
+
+  return {
+    inicio: new Date(anoIni, mesIni, diaIni),
+    fim: new Date(anoFim, mesFim, diaFim)
+  };
+}
+
+/**
+ * Calcula a data da Páscoa (Domingo) para um determinado ano, pelo
+ * algoritmo Anônimo Gregoriano (Meeus/Jones/Butcher).
+ */
+function calcularPascoa(ano) {
+  var a = ano % 19;
+  var b = Math.floor(ano / 100);
+  var c = ano % 100;
+  var d = Math.floor(b / 4);
+  var e = b % 4;
+  var f = Math.floor((b + 8) / 25);
+  var g = Math.floor((b - f + 1) / 3);
+  var h = (19 * a + b - d - g + 15) % 30;
+  var i = Math.floor(c / 4);
+  var k = c % 4;
+  var l = (32 + 2 * e + 2 * i - h - k) % 7;
+  var m = Math.floor((a + 11 * h + 22 * l) / 451);
+  var mes = Math.floor((h + l - 7 * m + 114) / 31); // 3 = Março, 4 = Abril
+  var dia = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(ano, mes - 1, dia);
+}
+
+/**
+ * Retorna a lista de feriados nacionais de um ano, incluindo os feriados
+ * fixos e os móveis calculados a partir da Páscoa (Carnaval, Quarta-feira
+ * de Cinzas, Sexta-feira Santa e Corpus Christi).
+ */
+function obterFeriadosNacionais(ano) {
+  var feriados = [];
+
+  var somarDias = function(data, dias) {
+    var d = new Date(data.getTime());
+    d.setDate(d.getDate() + dias);
+    return d;
+  };
+
+  var fixos = [
+    [0, 1],   // 01/01 - Confraternização Universal
+    [3, 21],  // 21/04 - Tiradentes
+    [4, 1],   // 01/05 - Dia do Trabalho
+    [8, 7],   // 07/09 - Independência do Brasil
+    [9, 12],  // 12/10 - Nossa Senhora Aparecida
+    [10, 2],  // 02/11 - Finados
+    [10, 15], // 15/11 - Proclamação da República
+    [10, 20], // 20/11 - Dia Nacional de Zumbi e da Consciência Negra
+    [11, 25]  // 25/12 - Natal
+  ];
+  fixos.forEach(function(f) {
+    feriados.push(new Date(ano, f[0], f[1]));
+  });
+
+  var pascoa = calcularPascoa(ano);
+  feriados.push(somarDias(pascoa, -48)); // Carnaval (segunda-feira)
+  feriados.push(somarDias(pascoa, -47)); // Carnaval (terça-feira)
+  feriados.push(somarDias(pascoa, -46)); // Quarta-feira de Cinzas
+  feriados.push(somarDias(pascoa, -2));  // Sexta-feira Santa
+  feriados.push(pascoa);                 // Domingo de Páscoa
+  feriados.push(somarDias(pascoa, 60));  // Corpus Christi
+
+  return feriados;
+}
+
+/**
+ * Formata uma data como chave "AAAA-MM-DD", independente de fuso horário.
+ */
+function formatarChaveData(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+/**
+ * Calcula os dias úteis (segunda a sexta) entre duas datas (inclusive),
+ * excluindo os feriados nacionais (fixos e móveis) do(s) ano(s) do período.
+ */
+function calcularDiasUteis(dataInicial, dataFinal) {
+  var dias = [];
+  var mapaFeriadosPorAno = {};
+
+  var atual = new Date(dataInicial.getFullYear(), dataInicial.getMonth(), dataInicial.getDate());
+  var fim = new Date(dataFinal.getFullYear(), dataFinal.getMonth(), dataFinal.getDate());
+
+  while (atual.getTime() <= fim.getTime()) {
+    var ano = atual.getFullYear();
+    if (!mapaFeriadosPorAno[ano]) {
+      mapaFeriadosPorAno[ano] = {};
+      obterFeriadosNacionais(ano).forEach(function(d) {
+        mapaFeriadosPorAno[ano][formatarChaveData(d)] = true;
+      });
+    }
+
+    var diaSemana = atual.getDay(); // 0 = Domingo, 6 = Sábado
+    var eFeriado = !!mapaFeriadosPorAno[ano][formatarChaveData(atual)];
+
+    if (diaSemana !== 0 && diaSemana !== 6 && !eFeriado) {
+      dias.push(new Date(atual.getTime()));
+    }
+
+    atual.setDate(atual.getDate() + 1);
+  }
+
+  return dias;
+}
+
+/**
+ * Grava as datas úteis calculadas na aba "schedulingDates" (coluna A),
+ * preservando o status "active" (coluna C) de datas já existentes e sem
+ * duplicar datas. Garante também a fórmula MAP+LAMBDA da coluna B (weekDay).
+ */
+function gravarDatasAgendamento(ss, diasUteis) {
+  var aba = ss.getSheetByName('schedulingDates');
+  if (!aba) throw new Error('Aba "schedulingDates" não encontrada.');
+
+  var ultimaLinha = aba.getLastRow();
+  var mapaAtivo = {};
+
+  if (ultimaLinha >= 2) {
+    aba.getRange(2, 1, ultimaLinha - 1, 3).getValues().forEach(function(linha) {
+      var data = linha[0];
+      if (data instanceof Date && !isNaN(data.getTime())) {
+        mapaAtivo[formatarChaveData(data)] = linha[2] === true;
+      }
+    });
+  }
+
+  var totalAntes = Object.keys(mapaAtivo).length;
+
+  diasUteis.forEach(function(d) {
+    var chave = formatarChaveData(d);
+    if (!(chave in mapaAtivo)) mapaAtivo[chave] = false;
+  });
+
+  var chaves = Object.keys(mapaAtivo).sort();
+
+  if (ultimaLinha >= 2) {
+    aba.getRange(2, 1, ultimaLinha - 1, 1).clearContent();
+    aba.getRange(2, 3, ultimaLinha - 1, 1).clearContent();
+  }
+
+  if (chaves.length > 0) {
+    var linhasData = chaves.map(function(chave) {
+      var p = chave.split('-');
+      return [new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]))];
+    });
+    var linhasAtivo = chaves.map(function(chave) {
+      return [mapaAtivo[chave]];
+    });
+
+    aba.getRange(2, 1, linhasData.length, 1).setValues(linhasData);
+    aba.getRange(2, 3, linhasAtivo.length, 1).setValues(linhasAtivo);
+  }
+
+  garantirFormulaWeekDay(aba);
+
+  return chaves.length - totalAntes;
+}
+
+/**
+ * Garante que a coluna B (weekDay) tenha a fórmula MAP+LAMBDA que calcula
+ * o dia da semana de cada data preenchida na coluna A.
+ */
+function garantirFormulaWeekDay(aba) {
+  var celula = aba.getRange('B2');
+  if (!celula.getFormula()) {
+    celula.setFormula('=MAP(A2:A, LAMBDA(d, IF(d="", "", WEEKDAY(d))))');
   }
 }
