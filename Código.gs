@@ -67,44 +67,23 @@ function aplicarPontuacao(lista, isEcho) {
 
 function abrirModal() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var abaPrincipal = ss.getSheetByName('Principal');
-  var abaListas = ss.getSheetByName('Listas por Conclusões');
-  
-  var nomeConcursoBruto = abaPrincipal.getRange('F3').getValue() || "NÃO INFORMADO";
-  var nomeConcurso = String(nomeConcursoBruto).replace(/CONCURSO\s+/i, '');
-  
-  var dadosCandidatos = abaPrincipal.getRange('D12:D').getValues();
-  var qtdeCandidatos = 0;
-  for (var c = 0; c < dadosCandidatos.length; c++) {
-    if (String(dadosCandidatos[c][0]).trim() !== "") qtdeCandidatos++;
-  }
-  
-  var dadosListas = abaListas.getDataRange().getValues();
-  var aptos = [], inaptos = [], faltosos = [], idm = [], recursos = [];
-  
-  for (var i = 1; i < dadosListas.length; i++) {
-    var linha = dadosListas[i];
-    if (linha[0]) aptos.push("- " + linha[0] + "  " + linha[1]);
-    if (linha[3]) inaptos.push("- " + linha[3] + "  " + linha[4]);
-    if (linha[6]) faltosos.push("- " + linha[6] + "  " + linha[7]);
-    if (linha[9]) idm.push("- " + linha[9] + "  " + linha[10]);
-    if (linha[12]) {
-      var dataBruta = linha[14];
-      var dataFormatada = formatarDataMilitar(dataBruta);
-      recursos.push("- Em " + dataFormatada + ": " + linha[12] + "  " + linha[13]);
-    }
-  }
 
-  aptos = aplicarPontuacao(aptos, false);
-  inaptos = aplicarPontuacao(inaptos, false);
-  faltosos = aplicarPontuacao(faltosos, false);
-  idm = aplicarPontuacao(idm, false);
-  recursos = aplicarPontuacao(recursos, true);
+  var dadosMsgInicial = obterDadosMensagemInicial(ss);
+  var dataHoraInicial = dadosMsgInicial ? dadosMsgInicial.dataHora : 'R-000000Z/MMM/AAAA';
+  var nomeConcurso = dadosMsgInicial ? extrairNomeConcurso(dadosMsgInicial.subject) : 'NÃO INFORMADO';
+
+  var candidatosPorStatus = obterCandidatosPorStatus(ss);
+
+  var aptos = aplicarPontuacao(candidatosPorStatus.aptos, false);
+  var inaptos = aplicarPontuacao(candidatosPorStatus.inaptos, false);
+  var faltosos = aplicarPontuacao(candidatosPorStatus.faltosos, false);
+  var idm = aplicarPontuacao(candidatosPorStatus.idm, false);
+  var recursos = aplicarPontuacao(candidatosPorStatus.recursos, true);
 
   var texto = [];
-  
-  texto.push("R-000000Z/MMM/AAAA, PTC que JRS/HNRe concluiu em " + formatarDataMilitar(new Date()) + " as IS dos " + qtdeCandidatos + " candidatos APS FIM Ingresso no " + nomeConcurso + " CFM os resultados abaixo relacionados:");
-  texto.push(""); 
+
+  texto.push(dataHoraInicial + ", PTC que JRS/HNRe concluiu em " + formatarDataMilitar(new Date()) + " as IS dos " + candidatosPorStatus.total + " candidatos APS FIM Ingresso no " + nomeConcurso + " CFM os resultados abaixo relacionados:");
+  texto.push("");
   
   texto.push('ALFA - Candidatos considerados "Aptos para Ingresso" (total: ' + aptos.length + '):');
   if (aptos.length > 0) texto.push(aptos.join('\n'));
@@ -609,6 +588,52 @@ function lerParesIdNome(aba) {
     });
   }
   return pares;
+}
+
+/**
+ * Agrupa todos os candidatos de "candidatosDataBase" (com o nome anexado
+ * de "candidatos") pelo valor da coluna "status" (APTO/INAPTO/FALTOU/
+ * INSUF DOCUMENTAL), no formato "- {id}  {nome}" usado na minuta de
+ * resultados da IS. Também monta a lista de candidatos com recurso
+ * ("recurso" = "Sim"), no formato "- Em {dataLaudo}: {id}  {nome}", e
+ * retorna o total de candidatos cadastrados (independente do status).
+ */
+function obterCandidatosPorStatus(ss) {
+  var abaDataBase = ss.getSheetByName('candidatosDataBase');
+  var abaCandidatos = ss.getSheetByName('candidatos');
+  if (!abaDataBase) throw new Error('Aba "candidatosDataBase" não encontrada.');
+  if (!abaCandidatos) throw new Error('Aba "candidatos" não encontrada.');
+
+  var mapaNomes = {};
+  lerParesIdNome(abaCandidatos).forEach(function(c) { mapaNomes[c.id] = c.nome; });
+
+  var resultado = { total: 0, aptos: [], inaptos: [], faltosos: [], idm: [], recursos: [] };
+
+  var ultimaLinha = abaDataBase.getLastRow();
+  if (ultimaLinha < 2) return resultado;
+
+  abaDataBase.getRange(2, 1, ultimaLinha - 1, 10).getValues().forEach(function(linha) {
+    var id = String(linha[0]).trim();
+    if (!id) return;
+    resultado.total++;
+
+    var nome = mapaNomes[id] || '';
+    var status = String(linha[3]).trim().toUpperCase();
+    var recurso = String(linha[5]).trim();
+    var dataLaudo = linha[6];
+    var item = '- ' + id + '  ' + nome;
+
+    if (status === 'APTO') resultado.aptos.push(item);
+    else if (status === 'INAPTO') resultado.inaptos.push(item);
+    else if (status === 'FALTOU') resultado.faltosos.push(item);
+    else if (status === 'INSUF DOCUMENTAL') resultado.idm.push(item);
+
+    if (recurso.toLowerCase() === 'sim') {
+      resultado.recursos.push('- Em ' + formatarDataMilitar(dataLaudo) + ': ' + id + '  ' + nome);
+    }
+  });
+
+  return resultado;
 }
 
 /**
