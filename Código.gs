@@ -900,3 +900,269 @@ function gravarDatasAgendamento(ss, diasUteis) {
 
   return chaves.length - totalAntes;
 }
+
+
+// =========================================================================
+// AGENDAMENTO DE INSPEÇÕES DE SAÚDE (IS)
+// =========================================================================
+
+/**
+ * 1. Abre o modal de configuração do agendamento (AgendamentoIS.html),
+ *    com o resumo (total de candidatos pendentes, período e dias úteis
+ *    disponíveis) já calculado.
+ */
+function abrirModalAgendamento() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var pendentes = listarCandidatosPendentesAgendamento(ss);
+
+  if (pendentes.length === 0) {
+    mostrarAlertaGenerico('Aviso', 'Não há candidatos pendentes de agendamento (todos já têm uma data em "schedulingDate", em "examineedataBase").');
+    return;
+  }
+
+  var datas = listarDatasDisponiveis(ss);
+
+  var contexto = {
+    totalCandidatos: pendentes.length,
+    periodoInicioFormatado: datas.length ? formatarDataSimples(datas[0].data) : '',
+    periodoFimFormatado: datas.length ? formatarDataSimples(datas[datas.length - 1].data) : '',
+    diasUteisDisponiveis: datas.length
+  };
+
+  var htmlTemplate = HtmlService.createTemplateFromFile('AgendamentoIS');
+  htmlTemplate.contexto = contexto;
+
+  var htmlOutput = htmlTemplate.evaluate()
+    .setWidth(600)
+    .setHeight(650)
+    .setTitle('Inspeção de Saúde - Marinha do Brasil');
+
+  SpreadsheetApp.getUi().showModalDialog(htmlOutput, ' ');
+}
+
+/**
+ * Lista os candidatos de "examineedataBase" que ainda não têm uma data
+ * em "schedulingDate", já com o nome (de "examinee") anexado. A ordem
+ * segue a mesma ordem de "examineedataBase" (que espelha "examinee",
+ * já ordenada alfabeticamente por nome).
+ */
+function listarCandidatosPendentesAgendamento(ss) {
+  var abaDataBase = ss.getSheetByName('examineedataBase');
+  var abaExaminee = ss.getSheetByName('examinee');
+  if (!abaDataBase) throw new Error('Aba "examineedataBase" não encontrada.');
+  if (!abaExaminee) throw new Error('Aba "examinee" não encontrada.');
+
+  var mapaNomes = {};
+  lerParesIdNome(abaExaminee).forEach(function(c) { mapaNomes[c.id] = c.nome; });
+
+  var ultimaLinha = abaDataBase.getLastRow();
+  if (ultimaLinha < 2) return [];
+
+  var pendentes = [];
+  abaDataBase.getRange(2, 1, ultimaLinha - 1, 2).getValues().forEach(function(linha) {
+    var id = String(linha[0]).trim();
+    var jaAgendado = linha[1] instanceof Date && !isNaN(linha[1].getTime());
+    if (id && !jaAgendado) {
+      pendentes.push({ id: id, nome: mapaNomes[id] || '' });
+    }
+  });
+
+  return pendentes;
+}
+
+/**
+ * Lista as datas presentes em "schedulingDates" (colunas A e B),
+ * em ordem crescente.
+ */
+function listarDatasDisponiveis(ss) {
+  var aba = ss.getSheetByName('schedulingDates');
+  if (!aba) throw new Error('Aba "schedulingDates" não encontrada.');
+
+  var ultimaLinha = aba.getLastRow();
+  var datas = [];
+
+  if (ultimaLinha >= 2) {
+    aba.getRange(2, 1, ultimaLinha - 1, 2).getValues().forEach(function(linha) {
+      if (linha[0] instanceof Date && !isNaN(linha[0].getTime())) {
+        datas.push({ data: linha[0], diaSemana: String(linha[1]).trim() });
+      }
+    });
+  }
+
+  datas.sort(function(a, b) { return a.data.getTime() - b.data.getTime(); });
+  return datas;
+}
+
+/**
+ * 2. Marca "active" (coluna C de "schedulingDates") como TRUE para as
+ *    datas cujo dia da semana está entre os selecionados, e FALSE para
+ *    as demais, refletindo a configuração escolhida pelo usuário.
+ */
+function ativarDatasPorDiaSemana(ss, diasSemanaSelecionados) {
+  var aba = ss.getSheetByName('schedulingDates');
+  if (!aba) throw new Error('Aba "schedulingDates" não encontrada.');
+
+  var ultimaLinha = aba.getLastRow();
+  if (ultimaLinha < 2) return;
+
+  var diasSemanaColuna = aba.getRange(2, 2, ultimaLinha - 1, 1).getValues();
+  var valoresAtivo = diasSemanaColuna.map(function(linha) {
+    return [diasSemanaSelecionados.indexOf(String(linha[0]).trim()) !== -1];
+  });
+
+  aba.getRange(2, 3, valoresAtivo.length, 1).setValues(valoresAtivo);
+}
+
+/**
+ * 3. Verifica se a combinação "quantidade de IS por dia" + "dias da
+ *    semana escolhidos" é suficiente para agendar todos os candidatos
+ *    pendentes. Se não for, sugere aumentar a quantidade por dia ou o
+ *    número de dias da semana usados. Se for, retorna a distribuição
+ *    completa (data + candidatos) para exibição no modal.
+ *    Chamada via google.script.run a partir de AgendamentoIS.html.
+ */
+function verificarViabilidadeAgendamento(quantidadePorDia, diasSemanaSelecionados) {
+  quantidadePorDia = parseInt(quantidadePorDia, 10);
+  if (!quantidadePorDia || quantidadePorDia < 1) {
+    throw new Error('Informe uma quantidade válida de IS por dia (mínimo 1).');
+  }
+  if (!diasSemanaSelecionados || diasSemanaSelecionados.length === 0) {
+    throw new Error('Selecione ao menos um dia da semana.');
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  ativarDatasPorDiaSemana(ss, diasSemanaSelecionados);
+
+  var candidatos = listarCandidatosPendentesAgendamento(ss);
+  if (candidatos.length === 0) {
+    return { viavel: false, mensagem: 'Não há candidatos pendentes de agendamento.' };
+  }
+
+  var datas = listarDatasDisponiveis(ss).filter(function(d) {
+    return diasSemanaSelecionados.indexOf(d.diaSemana) !== -1;
+  });
+  if (datas.length === 0) {
+    return { viavel: false, mensagem: 'Nenhuma das datas disponíveis em "schedulingDates" cai nos dias da semana selecionados.' };
+  }
+
+  var capacidadeTotal = datas.length * quantidadePorDia;
+  if (capacidadeTotal < candidatos.length) {
+    var qtdePorDiaSugerida = Math.ceil(candidatos.length / datas.length);
+    var diasNecessariosSugeridos = Math.ceil(candidatos.length / quantidadePorDia);
+    var mensagem = 'Com ' + quantidadePorDia + ' IS/dia em ' + datas.length + ' dia(s) disponível(is), ' +
+      'cabem apenas ' + capacidadeTotal + ' candidatos, mas há ' + candidatos.length + ' pendentes.<br><br>' +
+      'Sugestões: aumente para pelo menos <b>' + qtdePorDiaSugerida + ' IS por dia</b> (mantendo os mesmos dias da semana), ' +
+      'ou selecione dias da semana suficientes para ter ao menos <b>' + diasNecessariosSugeridos + ' data(s) disponível(is)</b> ' +
+      '(mantendo ' + quantidadePorDia + ' IS por dia).';
+    return { viavel: false, mensagem: mensagem };
+  }
+
+  var agendamento = distribuirCandidatosNasDatas(candidatos, datas, quantidadePorDia);
+
+  return {
+    viavel: true,
+    agendamento: agendamento.map(function(item) {
+      return {
+        dataFormatada: formatarDataSimples(item.data),
+        diaSemana: item.diaSemana,
+        candidatos: item.candidatos.map(function(c) { return c.nome; })
+      };
+    })
+  };
+}
+
+/**
+ * Distribui os candidatos (na ordem recebida) pelas datas disponíveis,
+ * preenchendo cada data até "quantidadePorDia" antes de passar para a
+ * próxima, na ordem cronológica das datas.
+ */
+function distribuirCandidatosNasDatas(candidatos, datas, quantidadePorDia) {
+  var resultado = [];
+  var indice = 0;
+
+  for (var i = 0; i < datas.length && indice < candidatos.length; i++) {
+    var grupo = candidatos.slice(indice, indice + quantidadePorDia);
+    if (grupo.length === 0) break;
+    resultado.push({ data: datas[i].data, diaSemana: datas[i].diaSemana, candidatos: grupo });
+    indice += grupo.length;
+  }
+
+  return resultado;
+}
+
+/**
+ * 4. Confirma o agendamento: recalcula a mesma distribuição (determinística
+ *    a partir dos mesmos parâmetros já validados em
+ *    verificarViabilidadeAgendamento), grava a data de cada candidato na
+ *    coluna "schedulingDate" de "examineedataBase" e exibe o modal com a
+ *    minuta da mensagem de agendamento.
+ *    Chamada via google.script.run a partir de AgendamentoIS.html.
+ */
+function confirmarAgendamentos(quantidadePorDia, diasSemanaSelecionados) {
+  quantidadePorDia = parseInt(quantidadePorDia, 10);
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var candidatos = listarCandidatosPendentesAgendamento(ss);
+  var datas = listarDatasDisponiveis(ss).filter(function(d) {
+    return diasSemanaSelecionados.indexOf(d.diaSemana) !== -1;
+  });
+
+  var agendamento = distribuirCandidatosNasDatas(candidatos, datas, quantidadePorDia);
+  if (agendamento.length === 0) {
+    throw new Error('Nenhum agendamento para confirmar. Verifique as datas novamente.');
+  }
+
+  gravarDatasAgendamentoCandidatos(ss, agendamento);
+
+  var textoMinuta = gerarTextoMinutaAgendamento(agendamento);
+
+  var htmlTemplate = HtmlService.createTemplateFromFile('Modal');
+  htmlTemplate.textoFinal = textoMinuta;
+
+  var htmlOutput = htmlTemplate.evaluate()
+    .setWidth(750)
+    .setHeight(800)
+    .setTitle('Inspeção de Saúde - Marinha do Brasil');
+
+  SpreadsheetApp.getUi().showModalDialog(htmlOutput, ' ');
+}
+
+/**
+ * Grava, para cada candidato agendado, a data escolhida na coluna
+ * "schedulingDate" (coluna B) de "examineedataBase", localizando a linha
+ * pelo "id".
+ */
+function gravarDatasAgendamentoCandidatos(ss, agendamento) {
+  var aba = ss.getSheetByName('examineedataBase');
+  if (!aba) throw new Error('Aba "examineedataBase" não encontrada.');
+
+  var ultimaLinha = aba.getLastRow();
+  if (ultimaLinha < 2) return;
+
+  var mapaLinhaPorId = {};
+  aba.getRange(2, 1, ultimaLinha - 1, 1).getValues().forEach(function(linha, indice) {
+    var id = String(linha[0]).trim();
+    if (id) mapaLinhaPorId[id] = indice + 2;
+  });
+
+  agendamento.forEach(function(item) {
+    item.candidatos.forEach(function(c) {
+      var linha = mapaLinhaPorId[c.id];
+      if (linha) aba.getRange(linha, 2).setValue(item.data);
+    });
+  });
+}
+
+/**
+ * Gera o texto da minuta de agendamento. RASCUNHO PROVISÓRIO: o padrão
+ * definitivo da mensagem (formato, campos, orientações) será fornecido
+ * em um próximo comando e deverá substituir esta implementação.
+ */
+function gerarTextoMinutaAgendamento(agendamento) {
+  var linhas = agendamento.map(function(item) {
+    var nomesCandidatos = item.candidatos.map(function(c) { return c.nome; }).join(', ');
+    return formatarDataSimples(item.data) + ' (' + item.diaSemana + '): ' + nomesCandidatos;
+  });
+
+  return 'AGENDAMENTO DE INSPEÇÃO DE SAÚDE\n\n' + linhas.join('\n');
+}

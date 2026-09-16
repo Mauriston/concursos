@@ -179,7 +179,7 @@
   </div>
 
   <div class="footer-actions" id="acoes-resultado" hidden>
-    <button class="btn btn-primary" onclick="google.script.host.close()">OK, Fechar</button>
+    <button class="btn btn-primary" id="btn-acao-resultado" onclick="acaoResultado()">OK, Fechar</button>
   </div>
 
   <script>
@@ -249,16 +249,41 @@
       leitor.readAsDataURL(arquivoSelecionado);
     }
 
+    var handlerAcaoResultado = function() { google.script.host.close(); };
+
+    function acaoResultado() {
+      handlerAcaoResultado();
+    }
+
     function mostrarSucesso(mensagemHtml) {
       document.getElementById('titulo-resultado').innerText = 'Processo Concluído';
       document.getElementById('texto-resultado').innerHTML = mensagemHtml;
       document.getElementById('acoes-resultado').hidden = false;
+      document.getElementById('btn-acao-resultado').innerText = 'Ir ao agendamento';
+      handlerAcaoResultado = irParaAgendamento;
     }
 
     function mostrarErro(erro) {
       document.getElementById('titulo-resultado').innerText = 'Erro';
       document.getElementById('texto-resultado').innerHTML = erro.message || String(erro);
       document.getElementById('acoes-resultado').hidden = false;
+      document.getElementById('btn-acao-resultado').innerText = 'OK, Fechar';
+      handlerAcaoResultado = function() { google.script.host.close(); };
+    }
+
+    function irParaAgendamento() {
+      var btn = document.getElementById('btn-acao-resultado');
+      btn.disabled = true;
+      btn.innerText = 'Abrindo...';
+
+      google.script.run
+        .withSuccessHandler(function() { google.script.host.close(); })
+        .withFailureHandler(function(erro) {
+          btn.disabled = false;
+          btn.innerText = 'Ir ao agendamento';
+          alert(erro.message || String(erro));
+        })
+        .abrirModalAgendamento();
     }
   </script>
 </body>
