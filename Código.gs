@@ -381,24 +381,22 @@ function processarArquivoMensagem(arquivoPdf) {
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var novosExaminee = 0;
-  var novosDataBase = 0;
   if (candidatos.length) {
     var resultadoExaminee = gravarExaminee(ss, candidatos);
     novosExaminee = resultadoExaminee.novos;
-    novosDataBase = gravarExamineeDataBase(ss, resultadoExaminee.listaOrdenada);
+    gravarExamineeDataBase(ss, resultadoExaminee.listaOrdenada);
   }
   gravarMensagem(ss, dadosMsg, arquivoPdf.getUrl());
 
   var periodoJRS = extrairPeriodoJRS(dadosMsg.texto || textoMensagem);
-  var infoDatas;
+  var infoPeriodo;
   if (periodoJRS) {
     var diasUteis = calcularDiasUteis(periodoJRS.inicio, periodoJRS.fim);
-    var novasDatas = gravarDatasAgendamento(ss, diasUteis);
-    infoDatas = diasUteis.length + ' dias úteis identificados entre ' +
-      formatarDataSimples(periodoJRS.inicio) + ' e ' + formatarDataSimples(periodoJRS.fim) +
-      ' (' + novasDatas + ' novos em "schedulingDates")';
+    gravarDatasAgendamento(ss, diasUteis);
+    infoPeriodo = formatarDataSimples(periodoJRS.inicio) + ' à ' + formatarDataSimples(periodoJRS.fim) +
+      ' (' + diasUteis.length + ' dias úteis).';
   } else {
-    infoDatas = 'Período de agendamento (JRS) não identificado no texto da mensagem.';
+    infoPeriodo = 'não identificado no texto da mensagem.';
   }
 
   var avisoCandidatos = candidatos.length === 0
@@ -406,11 +404,9 @@ function processarArquivoMensagem(arquivoPdf) {
     : '';
 
   return 'Mensagem <b>' + dadosMsg.dataHora + '</b> processada com sucesso!<br><br>' +
-    '<b>Candidatos identificados:</b> ' + candidatos.length + '<br>' +
-    '<b>Novos em "examinee":</b> ' + novosExaminee + '<br>' +
-    '<b>Novos em "examineedataBase":</b> ' + novosDataBase + '<br>' +
-    '<b>Registro criado em "messages":</b> Sim<br>' +
-    '<b>Datas de agendamento (JRS):</b> ' + infoDatas +
+    '<b>Candidatos identificados na MSG:</b> ' + candidatos.length + '<br>' +
+    '<b>Novos candidatos inseridos na planilha:</b> ' + novosExaminee + '<br>' +
+    '<b>Período de agendamento identificado:</b> ' + infoPeriodo +
     avisoCandidatos;
 }
 
@@ -879,7 +875,11 @@ function gravarDatasAgendamento(ss, diasUteis) {
   if (chaves.length > 0) {
     var linhasData = chaves.map(function(chave) {
       var p = chave.split('-');
-      return [new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]))];
+      // Meio-dia (em vez de meia-noite) evita que o deslocamento de fuso
+      // horário entre a interpretação UTC do runtime V8 e o fuso da
+      // planilha (America/Recife) empurre a data para o dia anterior ao
+      // ser exibida (ex.: segunda-feira aparecendo como domingo).
+      return [new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]), 12, 0, 0)];
     });
     var linhasAtivo = chaves.map(function(chave) {
       return [mapaAtivo[chave]];
