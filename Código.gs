@@ -1114,7 +1114,7 @@ function confirmarAgendamentos(quantidadePorDia, diasSemanaSelecionados) {
 
   gravarDatasAgendamentoCandidatos(ss, agendamento);
 
-  var textoMinuta = gerarTextoMinutaAgendamento(agendamento);
+  var textoMinuta = gerarTextoMinutaAgendamento(ss, agendamento);
 
   var htmlTemplate = HtmlService.createTemplateFromFile('Modal');
   htmlTemplate.textoFinal = textoMinuta;
@@ -1154,15 +1154,125 @@ function gravarDatasAgendamentoCandidatos(ss, agendamento) {
 }
 
 /**
- * Gera o texto da minuta de agendamento. RASCUNHO PROVISÓRIO: o padrão
- * definitivo da mensagem (formato, campos, orientações) será fornecido
- * em um próximo comando e deverá substituir esta implementação.
+ * Gera o texto da minuta da MENSAGEM DE AGENDAMENTO, no padrão:
+ *
+ * {{data-hora MSG inicial}}, PTC:
+ *
+ * ALFA - As IS de Ingresso dos Candidatos a {{nomeConcurso}} estão
+ * agendadas conforme:
+ *
+ * UNO - {{1º dia}} às 7h30:
+ * - id examinee;
+ * ...
+ * - id examinee; e
+ * - id examinee.
+ *
+ * DOIS - {{2º dia}} às 7h30:
+ * ...
+ *
+ * BRAVO - CFM o item 3.1.2 da DGPM-406 (9ª Revisão)... BT
  */
-function gerarTextoMinutaAgendamento(agendamento) {
-  var linhas = agendamento.map(function(item) {
-    var nomesCandidatos = item.candidatos.map(function(c) { return c.nome; }).join(', ');
-    return formatarDataSimples(item.data) + ' (' + item.diaSemana + '): ' + nomesCandidatos;
+function gerarTextoMinutaAgendamento(ss, agendamento) {
+  var dadosMsgInicial = obterDadosMensagemInicial(ss);
+  var dataHoraInicial = dadosMsgInicial ? dadosMsgInicial.dataHora : 'R-000000Z/MMM/AAAA';
+  var nomeConcurso = dadosMsgInicial ? extrairNomeConcurso(dadosMsgInicial.subject) : 'NÃO INFORMADO';
+
+  var linhas = [];
+  linhas.push(dataHoraInicial + ', PTC:');
+  linhas.push('');
+  linhas.push('ALFA - As IS de Ingresso dos Candidatos a ' + nomeConcurso + ' estão agendadas conforme:');
+  linhas.push('');
+
+  agendamento.forEach(function(item, indice) {
+    var marcador = numeroItemLista(indice + 1);
+    linhas.push(marcador + ' - ' + formatarDataDDMMMAAAA(item.data) + ' às 7h30:');
+
+    var itensCandidatos = item.candidatos.map(function(c) {
+      return '- ' + c.id + ' ' + c.nome;
+    });
+    linhas.push(aplicarPontuacao(itensCandidatos, false).join('\n'));
+    linhas.push('');
   });
 
-  return 'AGENDAMENTO DE INSPEÇÃO DE SAÚDE\n\n' + linhas.join('\n');
+  linhas.push('BRAVO - CFM o item 3.1.2 da DGPM-406 (9ª Revisão), Os candidatos que não comparecerem das respectivas datas de agendamentos de suas IS ou não apresentarem a totalidade dos exames previstos no edital do certame da data agendada, terão suas IS concluídas e assinadas tempestivamente com laudos, respectivamente, de "faltou" ou "Insuficiência Documental Médica" BT');
+
+  return linhas.join('\n');
+}
+
+/**
+ * Localiza, na aba "messages", a mensagem mais recente com propósito
+ * "Apresentação e IS" (a mensagem inicial de apresentação de candidatos),
+ * retornando seu ID (Data-Hora) e o Assunto.
+ */
+function obterDadosMensagemInicial(ss) {
+  var aba = ss.getSheetByName('messages');
+  if (!aba) throw new Error('Aba "messages" não encontrada.');
+
+  var ultimaLinha = aba.getLastRow();
+  if (ultimaLinha < 2) return null;
+
+  var dados = aba.getRange(2, 1, ultimaLinha - 1, 7).getValues(); // id, fileUrl, purpose, sender, recipient, info, subject
+  for (var i = 0; i < dados.length; i++) {
+    if (String(dados[i][2]).trim() === 'Apresentação e IS') {
+      return { dataHora: String(dados[i][0]).trim(), subject: String(dados[i][6]).trim() };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Extrai o identificador do concurso (ex.: "CPAEAM/2026") do Assunto da
+ * mensagem, no padrão "SIGLA/AAAA".
+ */
+function extrairNomeConcurso(subject) {
+  var m = subject.match(/([A-ZÇ]{2,10}\/\d{4})/);
+  return m ? m[1] : subject;
+}
+
+/**
+ * Formata uma data no padrão militar sem separadores: ddMMMaaaa
+ * (ex.: 14AGO2026).
+ */
+function formatarDataDDMMMAAAA(data) {
+  var meses = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+  var dia = String(data.getDate()).padStart(2, '0');
+  var mes = meses[data.getMonth()];
+  var ano = data.getFullYear();
+  return dia + mes + ano;
+}
+
+/**
+ * Número cardinal por extenso em pt-BR, maiúsculo (suporta 1 a 999).
+ */
+function numeroCardinalExtenso(n) {
+  var unidades = ['', 'UM', 'DOIS', 'TRÊS', 'QUATRO', 'CINCO', 'SEIS', 'SETE', 'OITO', 'NOVE'];
+  var dezA19 = ['DEZ', 'ONZE', 'DOZE', 'TREZE', 'QUATORZE', 'QUINZE', 'DEZESSEIS', 'DEZESSETE', 'DEZOITO', 'DEZENOVE'];
+  var dezenas = ['', '', 'VINTE', 'TRINTA', 'QUARENTA', 'CINQUENTA', 'SESSENTA', 'SETENTA', 'OITENTA', 'NOVENTA'];
+  var centenas = ['', 'CENTO', 'DUZENTOS', 'TREZENTOS', 'QUATROCENTOS', 'QUINHENTOS', 'SEISCENTOS', 'SETECENTOS', 'OITOCENTOS', 'NOVECENTOS'];
+
+  if (n < 10) return unidades[n];
+  if (n < 20) return dezA19[n - 10];
+  if (n < 100) {
+    var d = Math.floor(n / 10);
+    var u = n % 10;
+    return dezenas[d] + (u > 0 ? ' E ' + unidades[u] : '');
+  }
+  if (n === 100) return 'CEM';
+  if (n < 1000) {
+    var c = Math.floor(n / 100);
+    var resto = n % 100;
+    return centenas[c] + (resto > 0 ? ' E ' + numeroCardinalExtenso(resto) : '');
+  }
+
+  return String(n);
+}
+
+/**
+ * Marcador numérico usado nas listas das mensagens navais: "UNO" para 1
+ * (em vez de "UM", convenção da Marinha para evitar ambiguidade com o
+ * artigo "um"), e o cardinal por extenso normal para os demais.
+ */
+function numeroItemLista(n) {
+  return n === 1 ? 'UNO' : numeroCardinalExtenso(n);
 }
