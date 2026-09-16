@@ -369,7 +369,7 @@ function obterPastaMensagens() {
  * grava tudo nas abas correspondentes. Retorna uma mensagem HTML de resultado.
  */
 function processarArquivoMensagem(arquivoPdf) {
-  var textoMensagem = extrairTextoPdf(arquivoPdf);
+  var textoMensagem = limparRuidoPaginacao(extrairTextoPdf(arquivoPdf));
   var dadosMsg = extrairCabecalhoMensagem(textoMensagem);
 
   if (!dadosMsg.dataHora) {
@@ -377,22 +377,26 @@ function processarArquivoMensagem(arquivoPdf) {
   }
 
   var candidatos = extrairCandidatos(dadosMsg.texto || textoMensagem);
+  dadosMsg.texto = normalizarTextoComCandidatos(dadosMsg.texto, candidatos);
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var novosExaminee = candidatos.length ? gravarExaminee(ss, candidatos) : 0;
-  var novosDataBase = candidatos.length ? gravarExamineeDataBase(ss, candidatos) : 0;
+  var novosExaminee = 0;
+  if (candidatos.length) {
+    var resultadoExaminee = gravarExaminee(ss, candidatos);
+    novosExaminee = resultadoExaminee.novos;
+    gravarExamineeDataBase(ss, resultadoExaminee.listaOrdenada);
+  }
   gravarMensagem(ss, dadosMsg, arquivoPdf.getUrl());
 
   var periodoJRS = extrairPeriodoJRS(dadosMsg.texto || textoMensagem);
-  var infoDatas;
+  var infoPeriodo;
   if (periodoJRS) {
     var diasUteis = calcularDiasUteis(periodoJRS.inicio, periodoJRS.fim);
-    var novasDatas = gravarDatasAgendamento(ss, diasUteis);
-    infoDatas = diasUteis.length + ' dias úteis identificados entre ' +
-      formatarDataSimples(periodoJRS.inicio) + ' e ' + formatarDataSimples(periodoJRS.fim) +
-      ' (' + novasDatas + ' novos em "schedulingDates")';
+    gravarDatasAgendamento(ss, diasUteis);
+    infoPeriodo = formatarDataSimples(periodoJRS.inicio) + ' à ' + formatarDataSimples(periodoJRS.fim) +
+      ' (' + diasUteis.length + ' dias úteis).';
   } else {
-    infoDatas = 'Período de agendamento (JRS) não identificado no texto da mensagem.';
+    infoPeriodo = 'não identificado no texto da mensagem.';
   }
 
   var avisoCandidatos = candidatos.length === 0
@@ -400,11 +404,9 @@ function processarArquivoMensagem(arquivoPdf) {
     : '';
 
   return 'Mensagem <b>' + dadosMsg.dataHora + '</b> processada com sucesso!<br><br>' +
-    '<b>Candidatos identificados:</b> ' + candidatos.length + '<br>' +
-    '<b>Novos em "examinee":</b> ' + novosExaminee + '<br>' +
-    '<b>Novos em "examineedataBase":</b> ' + novosDataBase + '<br>' +
-    '<b>Registro criado em "messages":</b> Sim<br>' +
-    '<b>Datas de agendamento (JRS):</b> ' + infoDatas +
+    '<b>Candidatos identificados na MSG:</b> ' + candidatos.length + '<br>' +
+    '<b>Novos candidatos inseridos na planilha:</b> ' + novosExaminee + '<br>' +
+    '<b>Período de agendamento identificado:</b> ' + infoPeriodo +
     avisoCandidatos;
 }
 
@@ -428,6 +430,24 @@ function extrairTextoPdf(arquivoPdf) {
   } finally {
     DriveApp.getFileById(arquivoConvertido.id).setTrashed(true);
   }
+}
+
+/**
+ * Remove ruído de paginação do texto extraído do PDF: a marca d'água
+ * repetida "HNRe - 02.2" e os rodapés "Página X de Y", que aparecem como
+ * texto real embutido nas quebras de página (não apenas elementos visuais)
+ * e acabam intercalados no meio do corpo da mensagem e da lista de
+ * candidatos. Também normaliza espaços/quebras de linha resultantes.
+ */
+function limparRuidoPaginacao(texto) {
+  var limpo = texto
+    .replace(/HNRe\s*-?\s*0?2\.2/gi, ' ')
+    .replace(/P[áa]gina\s+\d+\s+de\s+\d+/gi, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/[ \t]*\n[ \t]*/g, '\n')
+    .replace(/\n{3,}/g, '\n\n');
+
+  return limpo.trim();
 }
 
 /**
@@ -467,6 +487,12 @@ function extrairCabecalhoMensagem(texto) {
 /**
  * Extrai a lista de candidatos do corpo da mensagem: itens em lista não
  * enumerada, precedidos por matrícula no formato 000000-0.
+ *
+ * A lista costuma vir diagramada em colunas (duas ou mais por página), o
+ * que faz com que, no texto extraído, mais de um candidato às vezes caia
+ * na mesma linha física. Por isso o corte de cada item NÃO usa fim de
+ * linha como delimitador: ele sempre para no próximo código de matrícula
+ * (\d{6}-\d) encontrado, esteja ele na mesma linha ou não.
  */
 function extrairCandidatos(texto) {
   var inicio = texto.search(/candidatos\s+abaixo\s+relacionados/i);
@@ -477,15 +503,18 @@ function extrairCandidatos(texto) {
   );
 
   var candidatos = [];
-  var regexItem = /(\d{6}-\d)\s+([^\r\n]+)/g;
+  var regexItem = /(\d{6}-\d)\s+([\s\S]+?)(?=\d{6}-\d|$)/g;
   var m;
 
   while ((m = regexItem.exec(trecho)) !== null) {
     var id = m[1];
     var nome = m[2]
-      .replace(/;\s*e\s*$/i, '')
-      .replace(/[;.]\s*$/, '')
       .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/-\s*$/, '')
+      .trim()
+      .replace(/;\s*e$/i, '')
+      .replace(/[;.]$/, '')
       .trim();
     if (nome) candidatos.push({ id: id, nome: nome });
   }
@@ -494,51 +523,139 @@ function extrairCandidatos(texto) {
 }
 
 /**
- * Grava novos candidatos na aba "examinee" (colunas ID e examinee),
- * ignorando IDs já existentes.
+ * Reconstrói o bloco de candidatos dentro do texto da mensagem usando a
+ * lista já corretamente separada (um candidato por linha), no lugar do
+ * trecho original — que pode ter candidatos colados na mesma linha física
+ * por causa do layout em colunas do PDF. Mantém o restante do texto
+ * (introdução e itens DOIS/TRÊS/QUATRO) intocado. Reaproveita
+ * aplicarPontuacao() para manter o mesmo padrão de pontuação (";", "; e",
+ * ".") usado no restante do projeto.
+ */
+function normalizarTextoComCandidatos(texto, candidatos) {
+  if (!texto || !candidatos || candidatos.length === 0) return texto;
+
+  var inicio = texto.search(/candidatos\s+abaixo\s+relacionados/i);
+  var fim = texto.search(/\bDOIS\s*[-–—]/i);
+  if (inicio < 0 || fim < 0 || fim <= inicio) return texto;
+
+  var fimIntroducao = texto.indexOf(':', inicio);
+  if (fimIntroducao < 0 || fimIntroducao >= fim) return texto;
+
+  var antes = texto.substring(0, fimIntroducao + 1);
+  var depois = texto.substring(fim);
+
+  var linhas = candidatos.map(function(c) { return '- ' + c.id + ' ' + c.nome; });
+  var blocoCandidatos = aplicarPontuacao(linhas, false).join('\n');
+
+  return antes + '\n' + blocoCandidatos + '\n' + depois;
+}
+
+/**
+ * Grava novos candidatos na aba "examinee" (colunas ID e examinee) e
+ * reordena TODAS as linhas (novas e já existentes) em ordem alfabética
+ * crescente pelo nome. Retorna a quantidade de novos candidatos e a lista
+ * completa já ordenada (usada em seguida para sincronizar
+ * "examineedataBase" na mesma ordem).
  */
 function gravarExaminee(ss, candidatos) {
   var aba = ss.getSheetByName('examinee');
   if (!aba) throw new Error('Aba "examinee" não encontrada.');
 
-  var idsExistentes = coletarIdsExistentes(aba);
-  var novasLinhas = [];
+  var existentes = lerParesIdNome(aba);
+  var idsExistentes = {};
+  existentes.forEach(function(c) { idsExistentes[c.id] = true; });
 
+  var novos = 0;
   candidatos.forEach(function(c) {
     if (!idsExistentes[c.id]) {
-      novasLinhas.push([c.id, c.nome]);
+      existentes.push({ id: c.id, nome: c.nome });
       idsExistentes[c.id] = true;
+      novos++;
     }
   });
 
-  if (novasLinhas.length > 0) {
-    aba.getRange(aba.getLastRow() + 1, 1, novasLinhas.length, 2).setValues(novasLinhas);
+  existentes.sort(function(a, b) {
+    return a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' });
+  });
+
+  var ultimaLinha = aba.getLastRow();
+  if (ultimaLinha >= 2) {
+    aba.getRange(2, 1, ultimaLinha - 1, 2).clearContent();
   }
-  return novasLinhas.length;
+  if (existentes.length > 0) {
+    var linhas = existentes.map(function(c) { return [c.id, c.nome]; });
+    aba.getRange(2, 1, linhas.length, 2).setValues(linhas);
+  }
+
+  return { novos: novos, listaOrdenada: existentes };
 }
 
 /**
- * Grava os IDs dos novos candidatos na primeira coluna da aba
- * "examineedataBase", ignorando IDs já existentes.
+ * Utilitário: lê os pares {id, nome} das colunas A e B de uma aba
+ * (a partir da linha 2), ignorando linhas sem ID.
  */
-function gravarExamineeDataBase(ss, candidatos) {
+function lerParesIdNome(aba) {
+  var ultimaLinha = aba.getLastRow();
+  var pares = [];
+  if (ultimaLinha >= 2) {
+    aba.getRange(2, 1, ultimaLinha - 1, 2).getValues().forEach(function(linha) {
+      var id = String(linha[0]).trim();
+      var nome = String(linha[1]).trim();
+      if (id) pares.push({ id: id, nome: nome });
+    });
+  }
+  return pares;
+}
+
+/**
+ * Reescreve a coluna ID da aba "examineedataBase" seguindo exatamente a
+ * mesma ordem de "listaOrdenada" (a lista já ordenada de "examinee"),
+ * preservando os dados das demais colunas de cada candidato já existente
+ * e deixando em branco as colunas de candidatos novos. Elimina linhas
+ * órfãs/em branco que causavam o início dos dados fora da linha 2.
+ */
+function gravarExamineeDataBase(ss, listaOrdenada) {
   var aba = ss.getSheetByName('examineedataBase');
   if (!aba) throw new Error('Aba "examineedataBase" não encontrada.');
 
-  var idsExistentes = coletarIdsExistentes(aba);
-  var novosIds = [];
+  var NUM_COLUNAS = 9; // id + 8 colunas de dados (schedulingDate ... appealRequestUrl)
+  var ultimaLinha = aba.getLastRow();
+  var dadosPorId = {};
 
-  candidatos.forEach(function(c) {
-    if (!idsExistentes[c.id]) {
-      novosIds.push([c.id]);
-      idsExistentes[c.id] = true;
+  if (ultimaLinha >= 2) {
+    aba.getRange(2, 1, ultimaLinha - 1, NUM_COLUNAS).getValues().forEach(function(linha) {
+      var id = String(linha[0]).trim();
+      if (id) dadosPorId[id] = linha.slice(1);
+    });
+  }
+
+  var novos = 0;
+  var idsNaLista = {};
+  var linhasFinais = listaOrdenada.map(function(c) {
+    idsNaLista[c.id] = true;
+    if (dadosPorId[c.id]) {
+      return [c.id].concat(dadosPorId[c.id]);
+    }
+    novos++;
+    return [c.id].concat(new Array(NUM_COLUNAS - 1).fill(''));
+  });
+
+  // Preserva (ao final) qualquer ID com dados que não esteja na lista de
+  // "examinee", em vez de descartar silenciosamente.
+  Object.keys(dadosPorId).forEach(function(id) {
+    if (!idsNaLista[id]) {
+      linhasFinais.push([id].concat(dadosPorId[id]));
     }
   });
 
-  if (novosIds.length > 0) {
-    aba.getRange(aba.getLastRow() + 1, 1, novosIds.length, 1).setValues(novosIds);
+  if (ultimaLinha >= 2) {
+    aba.getRange(2, 1, ultimaLinha - 1, NUM_COLUNAS).clearContent();
   }
-  return novosIds.length;
+  if (linhasFinais.length > 0) {
+    aba.getRange(2, 1, linhasFinais.length, NUM_COLUNAS).setValues(linhasFinais);
+  }
+
+  return novos;
 }
 
 /**
@@ -758,7 +875,11 @@ function gravarDatasAgendamento(ss, diasUteis) {
   if (chaves.length > 0) {
     var linhasData = chaves.map(function(chave) {
       var p = chave.split('-');
-      return [new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]))];
+      // Meio-dia (em vez de meia-noite) evita que o deslocamento de fuso
+      // horário entre a interpretação UTC do runtime V8 e o fuso da
+      // planilha (America/Recife) empurre a data para o dia anterior ao
+      // ser exibida (ex.: segunda-feira aparecendo como domingo).
+      return [new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]), 12, 0, 0)];
     });
     var linhasAtivo = chaves.map(function(chave) {
       return [mapaAtivo[chave]];
