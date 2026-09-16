@@ -7,6 +7,8 @@ function onOpen() {
     .addItem('🛑 Cientificação de Recurso', 'iniciarGeracaoRecursos')
     .addSeparator()
     .addItem('📄 Registrar Mensagem (PDF)', 'iniciarUploadMensagem')
+    .addSeparator()
+    .addItem('⚙️ Ativar automação da tabela Principal', 'instalarGatilhoOnEditPrincipal')
     .addToUi();
 }
 
@@ -1291,8 +1293,11 @@ function garantirCapacidadeTabelaPrincipal(ss, aba, linhasNecessarias) {
 /**
  * Localiza dinamicamente, dentro das primeiras 20 linhas/colunas da aba
  * "Principal", o cabeçalho da tabela "principal" (procurando as colunas
- * "Matricula" e "Candidato") e retorna a linha do cabeçalho e as
- * colunas de "Data", "dataAgendamento", "Matricula" e "Candidato".
+ * "Matricula" e "Candidato") e retorna a linha do cabeçalho e as colunas
+ * de "Data", "dataAgendamento", "Matricula", "Candidato", "Status",
+ * "Observações", "Nº TIS" e "Data laudo". As quatro últimas retornam -1
+ * quando não encontradas (colunas opcionais, usadas pela sincronização
+ * com "candidatosDataBase").
  */
 function localizarTabelaPrincipal(aba) {
   var linhasBusca = Math.min(20, aba.getMaxRows());
@@ -1302,13 +1307,19 @@ function localizarTabelaPrincipal(aba) {
   for (var l = 0; l < valores.length; l++) {
     var linha = valores[l];
     var colMatricula = -1, colData = -1, colDataAgendamento = -1, colCandidato = -1;
+    var colStatus = -1, colObservacoes = -1, colNumTIS = -1, colDataLaudo = -1;
 
     for (var c = 0; c < linha.length; c++) {
-      var texto = normalizarTexto(linha[c]);
+      var textoOriginal = linha[c];
+      var texto = normalizarTexto(textoOriginal);
       if (texto === 'matricula') colMatricula = c + 1;
       else if (texto === 'dataagendamento') colDataAgendamento = c + 1;
       else if (texto === 'data') colData = c + 1;
       else if (texto === 'candidato') colCandidato = c + 1;
+      else if (texto === 'status') colStatus = c + 1;
+      else if (texto === 'observacoes') colObservacoes = c + 1;
+      else if (texto === 'datalaudo') colDataLaudo = c + 1;
+      else if (/tis/i.test(String(textoOriginal))) colNumTIS = c + 1;
     }
 
     if (colMatricula !== -1 && colCandidato !== -1) {
@@ -1317,7 +1328,11 @@ function localizarTabelaPrincipal(aba) {
         colData: colData !== -1 ? colData : 1,
         colDataAgendamento: colDataAgendamento !== -1 ? colDataAgendamento : Math.max(colMatricula - 1, 1),
         colMatricula: colMatricula,
-        colCandidato: colCandidato
+        colCandidato: colCandidato,
+        colStatus: colStatus,
+        colObservacoes: colObservacoes,
+        colNumTIS: colNumTIS,
+        colDataLaudo: colDataLaudo
       };
     }
   }
@@ -1540,4 +1555,256 @@ function numeroCardinalExtenso(n) {
  */
 function numeroItemLista(n) {
   return n === 1 ? 'UNO' : numeroCardinalExtenso(n);
+}
+
+
+// =========================================================================
+// SINCRONIZAÇÃO "Principal" -> "candidatosDataBase" (CRUD front-end)
+// =========================================================================
+
+/**
+ * Texto do "Laudo" (candidatosDataBase, coluna H) correspondente a cada
+ * opção da coluna "Status" da tabela "principal".
+ */
+var MAPA_LAUDO_POR_STATUS = {
+  'APTO': 'Apto para Ingresso',
+  'INAPTO': 'Inapto para Ingresso',
+  'FALTOU': 'IS não concluída por não comparecimento',
+  'INSUF DOCUMENTAL': 'IS não concluída por Insuficiência Documental Médica'
+};
+
+/**
+ * Cria (se ainda não existir) o gatilho onEdit INSTALÁVEL responsável pela
+ * sincronização Status/Nº TIS da tabela "principal" com "candidatosDataBase".
+ * Precisa ser instalável (não simples) porque exibe alertas (SpreadsheetApp.getUi()),
+ * o que um gatilho simples onEdit não tem permissão para fazer. Deve ser
+ * executado uma única vez, a partir do menu (função acionada pelo usuário
+ * tem autorização plena; um gatilho simples como onOpen não tem).
+ */
+function instalarGatilhoOnEditPrincipal() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var jaExiste = ScriptApp.getProjectTriggers().some(function(t) {
+    return t.getHandlerFunction() === 'aoEditarPrincipalInstalavel' && t.getEventType() === ScriptApp.EventType.ON_EDIT;
+  });
+
+  if (jaExiste) {
+    mostrarAlertaGenerico('Automação já ativa', 'A sincronização automática da tabela Principal com "candidatosDataBase" já está ativada nesta planilha.');
+    return;
+  }
+
+  ScriptApp.newTrigger('aoEditarPrincipalInstalavel')
+    .forSpreadsheet(ss)
+    .onEdit()
+    .create();
+
+  mostrarAlertaGenerico('Automação ativada', 'A partir de agora, edições de <b>Status</b> e <b>Nº TIS</b> na tabela Principal serão sincronizadas automaticamente com "candidatosDataBase".');
+}
+
+/**
+ * Gatilho onEdit instalável (ver instalarGatilhoOnEditPrincipal). Só age
+ * sobre edições de uma única célula, dentro das linhas de dados da tabela
+ * "principal" (aba "Principal"), nas colunas "Status" e "Nº TIS".
+ */
+function aoEditarPrincipalInstalavel(e) {
+  if (!e || !e.range) return;
+
+  var aba = e.range.getSheet();
+  if (aba.getName() !== 'Principal') return;
+  if (e.range.getNumRows() !== 1 || e.range.getNumColumns() !== 1) return;
+
+  var estrutura;
+  try {
+    estrutura = localizarTabelaPrincipal(aba);
+  } catch (erroEstrutura) {
+    return;
+  }
+
+  var linha = e.range.getRow();
+  var coluna = e.range.getColumn();
+  if (linha <= estrutura.linhaCabecalho) return;
+
+  if (coluna === estrutura.colNumTIS) {
+    sincronizarNumTISPrincipal(aba, estrutura, linha, e.value);
+  } else if (coluna === estrutura.colStatus) {
+    processarEdicaoStatusPrincipal(aba, estrutura, linha, e);
+  }
+}
+
+/**
+ * Localiza a linha (índice 1-based) do candidato de "id" na aba
+ * "candidatosDataBase", ou -1 se não encontrado.
+ */
+function localizarLinhaCandidatosDataBasePorId(aba, id) {
+  var ultimaLinha = aba.getLastRow();
+  if (ultimaLinha < 2) return -1;
+
+  var ids = aba.getRange(2, 1, ultimaLinha - 1, 1).getValues();
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]).trim() === id) return i + 2;
+  }
+  return -1;
+}
+
+/**
+ * Sincroniza a edição da coluna "Nº TIS" da tabela "principal" para a
+ * coluna "nº TIS" (coluna I) de "candidatosDataBase". Uma célula limpa
+ * também limpa o valor em "candidatosDataBase".
+ */
+function sincronizarNumTISPrincipal(aba, estrutura, linha, novoValor) {
+  var id = String(aba.getRange(linha, estrutura.colMatricula).getValue()).trim();
+  if (!id) return;
+
+  var abaDataBase = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('candidatosDataBase');
+  if (!abaDataBase) return;
+
+  var linhaDataBase = localizarLinhaCandidatosDataBasePorId(abaDataBase, id);
+  if (linhaDataBase === -1) return;
+
+  abaDataBase.getRange(linhaDataBase, 9).setValue(novoValor || '');
+}
+
+/**
+ * Processa a edição da coluna "Status" da tabela "principal":
+ * - Se a célula for limpa, limpa também "status", "finalizado", "dataLaudo"
+ *   e "Laudo" em "candidatosDataBase", e "Data laudo" em "Principal".
+ * - Se um status válido (APTO/INAPTO/FALTOU/INSUF DOCUMENTAL) for
+ *   selecionado, grava "status"/"finalizado"/"dataLaudo"/"Laudo" em
+ *   "candidatosDataBase" e a "Data laudo" de hoje em "Principal".
+ * - Para INAPTO, confirma com o usuário antes de gravar (revertendo a
+ *   célula ao valor anterior se recusado) e, em seguida, oferece gerar o
+ *   Termo de Cientificação de Recurso.
+ */
+function processarEdicaoStatusPrincipal(aba, estrutura, linha, e) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var id = String(aba.getRange(linha, estrutura.colMatricula).getValue()).trim();
+  if (!id) return;
+
+  var abaDataBase = ss.getSheetByName('candidatosDataBase');
+  if (!abaDataBase) return;
+
+  var linhaDataBase = localizarLinhaCandidatosDataBasePorId(abaDataBase, id);
+  if (linhaDataBase === -1) {
+    SpreadsheetApp.getUi().alert('Candidato com matrícula "' + id + '" não foi encontrado em "candidatosDataBase". A edição de Status não foi sincronizada.');
+    return;
+  }
+
+  var novoValor = String(e.value || '').trim().toUpperCase();
+
+  if (!novoValor) {
+    abaDataBase.getRange(linhaDataBase, 4).setValue('');
+    abaDataBase.getRange(linhaDataBase, 5).setValue(false);
+    abaDataBase.getRange(linhaDataBase, 7).setValue('');
+    abaDataBase.getRange(linhaDataBase, 8).setValue('');
+    if (estrutura.colDataLaudo !== -1) aba.getRange(linha, estrutura.colDataLaudo).setValue('');
+    return;
+  }
+
+  var laudoTexto = MAPA_LAUDO_POR_STATUS[novoValor];
+  if (!laudoTexto) return;
+
+  var nomeCandidato = String(aba.getRange(linha, estrutura.colCandidato).getValue()).trim();
+  var ui = SpreadsheetApp.getUi();
+  var hoje = new Date();
+  hoje.setHours(12, 0, 0, 0);
+
+  if (novoValor === 'INAPTO') {
+    var resposta = ui.alert(
+      'Confirmar Status',
+      'Registrar ' + nomeCandidato + ' como inapto hoje (' + formatarDataSimples(hoje) + ')?',
+      ui.ButtonSet.YES_NO
+    );
+    if (resposta !== ui.Button.YES) {
+      aba.getRange(linha, estrutura.colStatus).setValue(e.oldValue || '');
+      return;
+    }
+  }
+
+  abaDataBase.getRange(linhaDataBase, 4).setValue(novoValor);
+  abaDataBase.getRange(linhaDataBase, 5).setValue(true);
+  abaDataBase.getRange(linhaDataBase, 7).setValue(hoje);
+  abaDataBase.getRange(linhaDataBase, 8).setValue(laudoTexto);
+  if (estrutura.colDataLaudo !== -1) aba.getRange(linha, estrutura.colDataLaudo).setValue(hoje);
+
+  if (novoValor === 'INAPTO') {
+    var respostaTermo = ui.alert(
+      'Termo de Recurso',
+      'Gerar o termo de Cientificação de Recurso para ' + nomeCandidato + '?',
+      ui.ButtonSet.YES_NO
+    );
+    if (respostaTermo === ui.Button.YES) {
+      gerarTermoRecursoIndividual(id);
+    }
+  }
+}
+
+/**
+ * Gera o Termo de Cientificação de Recurso para um único candidato
+ * (identificado por "id"), buscando os dados em "candidatos" e
+ * "candidatosDataBase". Segue o mesmo template/pasta usados em
+ * processarGeracaoRecursos(), mas reaproveita um arquivo já existente em
+ * vez de duplicá-lo. Ao final, marca "recurso" = "Sim" e grava a URL do
+ * PDF em "termoRecursoUrl" (candidatosDataBase).
+ */
+function gerarTermoRecursoIndividual(id) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var abaCandidatos = ss.getSheetByName('candidatos');
+  var abaDataBase = ss.getSheetByName('candidatosDataBase');
+  var abaPrincipal = ss.getSheetByName('Principal');
+  if (!abaCandidatos || !abaDataBase) return;
+
+  var mapaNomes = {};
+  lerParesIdNome(abaCandidatos).forEach(function(c) { mapaNomes[c.id] = c.nome; });
+  var candidato = mapaNomes[id];
+  if (!candidato) {
+    SpreadsheetApp.getUi().alert('Candidato com matrícula "' + id + '" não encontrado em "candidatos". Termo não gerado.');
+    return;
+  }
+
+  var linhaDataBase = localizarLinhaCandidatosDataBasePorId(abaDataBase, id);
+  if (linhaDataBase === -1) return;
+
+  var dadosDataBase = abaDataBase.getRange(linhaDataBase, 1, 1, 10).getValues()[0];
+  var dataLaudo = formatarDataSimples(dadosDataBase[6]); // coluna G: dataLaudo
+
+  var nomeConcursoBruto = abaPrincipal ? (abaPrincipal.getRange('F3').getValue() || 'NÃO INFORMADO') : 'NÃO INFORMADO';
+  var nomeConcurso = String(nomeConcursoBruto).replace(/CONCURSO\s+/i, '');
+
+  var idPastaPai = '1_dJV8HP1WFXa5lSV-p0V0N22_YXWIRDa';
+  var subPasta = DriveApp.getFolderById(idPastaPai);
+
+  var nomeArquivoPdf = "Termo Recurso " + candidato + ".pdf";
+  var arquivosExistentes = subPasta.getFilesByName(nomeArquivoPdf);
+  var arquivoPdf;
+
+  if (arquivosExistentes.hasNext()) {
+    arquivoPdf = arquivosExistentes.next();
+  } else {
+    var idTemplate = '1CpgsInQSHnx_ji6NBfAiKmRmbfczKYW-M0QO4LZllgc';
+    var dataHojeFormatada = formatarDataSimples(new Date());
+
+    var docCopia = DriveApp.getFileById(idTemplate).makeCopy("Temp_Recurso_" + candidato);
+    var docAberto = DocumentApp.openById(docCopia.getId());
+    var body = docAberto.getBody();
+
+    body.replaceText("\\{\\{Candidato\\}\\}", candidato);
+    body.replaceText("\\{\\{Data Laudo\\}\\}", dataLaudo);
+    body.replaceText("\\{\\{DATA_HOJE\\}\\}", dataHojeFormatada);
+
+    docAberto.saveAndClose();
+
+    var pdfBlob = docCopia.getAs("application/pdf");
+    pdfBlob.setName(nomeArquivoPdf);
+    arquivoPdf = subPasta.createFile(pdfBlob);
+
+    docCopia.setTrashed(true);
+  }
+
+  abaDataBase.getRange(linhaDataBase, 6).setValue('Sim');
+  abaDataBase.getRange(linhaDataBase, 10).setValue(arquivoPdf.getUrl());
+
+  mostrarAlertaGenerico(
+    'Termo Gerado',
+    'Termo de Cientificação de Recurso gerado para <b>' + candidato + '</b> (' + nomeConcurso + ').<br><br>' +
+    '<a href="' + arquivoPdf.getUrl() + '" target="_blank">Abrir termo</a>'
+  );
 }
