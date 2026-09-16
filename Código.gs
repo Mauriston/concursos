@@ -1159,14 +1159,18 @@ function gravarDatasAgendamentoCandidatos(ss, agendamento) {
 /**
  * Preenche a tabela "principal" da aba "Principal" com os candidatos
  * agendados nesta confirmação: uma linha por candidato, preenchendo
- * "dataAgendamento", "Matricula" e "Candidato". Também aplica a
- * formatação da coluna "Data": para cada dia de agendamento, mescla a
- * coluna em duas metades (data em cima alinhada embaixo, dia da semana
- * embaixo alinhado em cima — ou uma célula só com as duas linhas quando
- * há um único candidato naquele dia) e pinta todas as colunas da tabela
- * daquelas linhas com fundo branco/cinza claro alternado por dia,
- * continuando a alternância a partir do último grupo já existente na
- * aba (em vez de sempre recomeçar do branco).
+ * "dataAgendamento", "Matricula" e "Candidato" — anexando a partir da
+ * primeira linha vazia (sem sobrescrever agendamentos de confirmações
+ * anteriores). Antes de escrever, garante que existam linhas
+ * suficientes (na grade e, quando possível, no limite da própria
+ * tabela estruturada). Também aplica a formatação da coluna "Data":
+ * para cada dia de agendamento, mescla a coluna em duas metades (data
+ * em cima alinhada embaixo, dia da semana embaixo alinhado em cima —
+ * ou uma célula só com as duas linhas quando há um único candidato
+ * naquele dia) e pinta todas as colunas da tabela daquelas linhas com
+ * fundo branco/cinza claro alternado por dia, continuando a
+ * alternância a partir do último grupo já existente na aba (em vez de
+ * sempre recomeçar do branco).
  *
  * A posição das colunas é localizada dinamicamente pelo cabeçalho (não
  * fixa por índice), então funciona independente da ordem/posição em que
@@ -1178,7 +1182,7 @@ function preencherAbaPrincipal(ss, agendamento) {
   if (!aba) throw new Error('Aba "Principal" não encontrada.');
 
   var estrutura = localizarTabelaPrincipal(aba);
-  var linhaInicio = estrutura.linhaCabecalho + 1;
+  var linhaInicio = proximaLinhaVaziaTabelaPrincipal(aba, estrutura);
 
   var linhas = [];
   agendamento.forEach(function(item) {
@@ -1189,10 +1193,7 @@ function preencherAbaPrincipal(ss, agendamento) {
   if (linhas.length === 0) return;
 
   var linhasNecessarias = linhaInicio + linhas.length - 1;
-  if (aba.getMaxRows() < linhasNecessarias) {
-    throw new Error('A aba "Principal" não tem linhas suficientes para inserir ' + linhas.length +
-      ' candidato(s) a partir da linha ' + linhaInicio + '. Adicione mais linhas à planilha e tente novamente.');
-  }
+  garantirCapacidadeTabelaPrincipal(ss, aba, linhasNecessarias);
 
   aba.getRange(linhaInicio, estrutura.colDataAgendamento, linhas.length, 1)
     .setValues(linhas.map(function(l) { return [l.data]; }));
@@ -1202,6 +1203,85 @@ function preencherAbaPrincipal(ss, agendamento) {
     .setValues(linhas.map(function(l) { return [l.nome]; }));
 
   aplicarFormatacaoColunaData(aba, estrutura, agendamento, linhaInicio);
+}
+
+/**
+ * Retorna a primeira linha vazia (sem "Matricula") da tabela
+ * "principal", a partir da linha seguinte ao cabeçalho — o ponto
+ * correto para ANEXAR novos candidatos sem sobrescrever agendamentos
+ * já gravados em confirmações anteriores.
+ */
+function proximaLinhaVaziaTabelaPrincipal(aba, estrutura) {
+  var primeiraLinhaDados = estrutura.linhaCabecalho + 1;
+  var ultimaLinhaComConteudo = aba.getLastRow();
+
+  if (ultimaLinhaComConteudo < primeiraLinhaDados) return primeiraLinhaDados;
+
+  var valores = aba.getRange(primeiraLinhaDados, estrutura.colMatricula, ultimaLinhaComConteudo - primeiraLinhaDados + 1, 1).getValues();
+  for (var i = 0; i < valores.length; i++) {
+    if (String(valores[i][0]).trim() === '') return primeiraLinhaDados + i;
+  }
+
+  return ultimaLinhaComConteudo + 1;
+}
+
+/**
+ * Garante que a aba tenha linhas físicas suficientes até
+ * "linhasNecessarias" (inserindo na grade quando faltar) e, quando
+ * possível, estende também o limite da tabela estruturada "principal"
+ * (via serviço avançado Sheets v4) para que as novas linhas fiquem
+ * dentro dos limites reais da tabela, não apenas soltas na grade.
+ * Se a tabela não puder ser localizada/estendida por algum motivo
+ * (ex.: API sem suporte), a escrita dos dados ainda funciona
+ * normalmente — só o contorno visual da tabela pode precisar de um
+ * ajuste manual (arrastar a alça no canto) depois.
+ */
+function garantirCapacidadeTabelaPrincipal(ss, aba, linhasNecessarias) {
+  if (aba.getMaxRows() < linhasNecessarias) {
+    aba.insertRowsAfter(aba.getMaxRows(), linhasNecessarias - aba.getMaxRows());
+  }
+
+  try {
+    var spreadsheetId = ss.getId();
+    var sheetId = aba.getSheetId();
+
+    var resposta = Sheets.Spreadsheets.get(spreadsheetId, {
+      fields: 'sheets(properties(sheetId),tables(tableId,name,range))'
+    });
+
+    var folhaAlvo = null;
+    (resposta.sheets || []).forEach(function(folha) {
+      if (folha.properties && folha.properties.sheetId === sheetId) folhaAlvo = folha;
+    });
+    if (!folhaAlvo) return;
+
+    var tabela = null;
+    (folhaAlvo.tables || []).forEach(function(t) {
+      if (t.name === 'principal') tabela = t;
+    });
+    if (!tabela || !tabela.range) return;
+    if (tabela.range.endRowIndex >= linhasNecessarias) return;
+
+    Sheets.Spreadsheets.batchUpdate({
+      requests: [{
+        updateTable: {
+          table: {
+            tableId: tabela.tableId,
+            range: {
+              sheetId: sheetId,
+              startRowIndex: tabela.range.startRowIndex,
+              endRowIndex: linhasNecessarias,
+              startColumnIndex: tabela.range.startColumnIndex,
+              endColumnIndex: tabela.range.endColumnIndex
+            }
+          },
+          fields: 'range'
+        }
+      }]
+    }, spreadsheetId);
+  } catch (erroTabela) {
+    Logger.log('Não foi possível estender a tabela estruturada "principal": ' + erroTabela.message);
+  }
 }
 
 /**
@@ -1274,7 +1354,9 @@ function obterUltimaColunaTabela(aba, linhaCabecalho) {
  * #f6f6f6) em todas as colunas da tabela, e a mescla da coluna "Data"
  * (data em cima, dia da semana embaixo). A alternância de cor continua
  * a partir da cor da última linha já existente acima de "linhaInicio",
- * em vez de sempre recomeçar do branco.
+ * em vez de sempre recomeçar do branco. Também destaca a borda superior
+ * da primeira linha e a borda inferior da última linha de cada bloco de
+ * data, para marcar visualmente a separação entre os dias.
  */
 function aplicarFormatacaoColunaData(aba, estrutura, agendamento, linhaInicio) {
   var ultimaColuna = obterUltimaColunaTabela(aba, estrutura.linhaCabecalho);
@@ -1293,6 +1375,11 @@ function aplicarFormatacaoColunaData(aba, estrutura, agendamento, linhaInicio) {
     corAnterior = corGrupo;
 
     aba.getRange(linhaAtual, 1, qtde, ultimaColuna).setBackground(corGrupo);
+
+    aba.getRange(linhaAtual, 1, 1, ultimaColuna)
+      .setBorder(true, null, null, null, null, null, '#434343', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+    aba.getRange(linhaAtual + qtde - 1, 1, 1, ultimaColuna)
+      .setBorder(null, null, true, null, null, null, '#434343', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
 
     var dataFormatada = formatarDataSimples(item.data);
     var diaSemanaFormatado = item.diaSemana.toLowerCase() + '-feira';
