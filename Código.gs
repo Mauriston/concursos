@@ -1354,7 +1354,9 @@ function obterUltimaColunaTabela(aba, linhaCabecalho) {
  * #f6f6f6) em todas as colunas da tabela, e a mescla da coluna "Data"
  * (data em cima, dia da semana embaixo). A alternância de cor continua
  * a partir da cor da última linha já existente acima de "linhaInicio",
- * em vez de sempre recomeçar do branco.
+ * em vez de sempre recomeçar do branco. Também destaca a borda superior
+ * da primeira linha e a borda inferior da última linha de cada bloco de
+ * data, para marcar visualmente a separação entre os dias.
  */
 function aplicarFormatacaoColunaData(aba, estrutura, agendamento, linhaInicio) {
   var ultimaColuna = obterUltimaColunaTabela(aba, estrutura.linhaCabecalho);
@@ -1373,6 +1375,11 @@ function aplicarFormatacaoColunaData(aba, estrutura, agendamento, linhaInicio) {
     corAnterior = corGrupo;
 
     aba.getRange(linhaAtual, 1, qtde, ultimaColuna).setBackground(corGrupo);
+
+    aba.getRange(linhaAtual, 1, 1, ultimaColuna)
+      .setBorder(true, null, null, null, null, null, '#434343', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+    aba.getRange(linhaAtual + qtde - 1, 1, 1, ultimaColuna)
+      .setBorder(null, null, true, null, null, null, '#434343', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
 
     var dataFormatada = formatarDataSimples(item.data);
     var diaSemanaFormatado = item.diaSemana.toLowerCase() + '-feira';
