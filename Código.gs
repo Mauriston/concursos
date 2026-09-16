@@ -1115,6 +1115,7 @@ function confirmarAgendamentos(quantidadePorDia, diasSemanaSelecionados) {
   }
 
   gravarDatasAgendamentoCandidatos(ss, agendamento);
+  preencherAbaPrincipal(ss, agendamento);
 
   var textoMinuta = gerarTextoMinutaAgendamento(ss, agendamento);
 
@@ -1152,6 +1153,177 @@ function gravarDatasAgendamentoCandidatos(ss, agendamento) {
       var linha = mapaLinhaPorId[c.id];
       if (linha) aba.getRange(linha, 2).setValue(item.data);
     });
+  });
+}
+
+/**
+ * Preenche a tabela "principal" da aba "Principal" com os candidatos
+ * agendados nesta confirmação: uma linha por candidato, preenchendo
+ * "dataAgendamento", "Matricula" e "Candidato". Também aplica a
+ * formatação da coluna "Data": para cada dia de agendamento, mescla a
+ * coluna em duas metades (data em cima alinhada embaixo, dia da semana
+ * embaixo alinhado em cima — ou uma célula só com as duas linhas quando
+ * há um único candidato naquele dia) e pinta todas as colunas da tabela
+ * daquelas linhas com fundo branco/cinza claro alternado por dia,
+ * continuando a alternância a partir do último grupo já existente na
+ * aba (em vez de sempre recomeçar do branco).
+ *
+ * A posição das colunas é localizada dinamicamente pelo cabeçalho (não
+ * fixa por índice), então funciona independente da ordem/posição em que
+ * as colunas "Data", "dataAgendamento", "Matricula" e "Candidato"
+ * estejam na tabela.
+ */
+function preencherAbaPrincipal(ss, agendamento) {
+  var aba = ss.getSheetByName('Principal');
+  if (!aba) throw new Error('Aba "Principal" não encontrada.');
+
+  var estrutura = localizarTabelaPrincipal(aba);
+  var linhaInicio = estrutura.linhaCabecalho + 1;
+
+  var linhas = [];
+  agendamento.forEach(function(item) {
+    item.candidatos.forEach(function(c) {
+      linhas.push({ data: item.data, id: c.id, nome: c.nome });
+    });
+  });
+  if (linhas.length === 0) return;
+
+  var linhasNecessarias = linhaInicio + linhas.length - 1;
+  if (aba.getMaxRows() < linhasNecessarias) {
+    throw new Error('A aba "Principal" não tem linhas suficientes para inserir ' + linhas.length +
+      ' candidato(s) a partir da linha ' + linhaInicio + '. Adicione mais linhas à planilha e tente novamente.');
+  }
+
+  aba.getRange(linhaInicio, estrutura.colDataAgendamento, linhas.length, 1)
+    .setValues(linhas.map(function(l) { return [l.data]; }));
+  aba.getRange(linhaInicio, estrutura.colMatricula, linhas.length, 1)
+    .setValues(linhas.map(function(l) { return [l.id]; }));
+  aba.getRange(linhaInicio, estrutura.colCandidato, linhas.length, 1)
+    .setValues(linhas.map(function(l) { return [l.nome]; }));
+
+  aplicarFormatacaoColunaData(aba, estrutura, agendamento, linhaInicio);
+}
+
+/**
+ * Localiza dinamicamente, dentro das primeiras 20 linhas/colunas da aba
+ * "Principal", o cabeçalho da tabela "principal" (procurando as colunas
+ * "Matricula" e "Candidato") e retorna a linha do cabeçalho e as
+ * colunas de "Data", "dataAgendamento", "Matricula" e "Candidato".
+ */
+function localizarTabelaPrincipal(aba) {
+  var linhasBusca = Math.min(20, aba.getMaxRows());
+  var colunasBusca = Math.min(20, aba.getMaxColumns());
+  var valores = aba.getRange(1, 1, linhasBusca, colunasBusca).getValues();
+
+  for (var l = 0; l < valores.length; l++) {
+    var linha = valores[l];
+    var colMatricula = -1, colData = -1, colDataAgendamento = -1, colCandidato = -1;
+
+    for (var c = 0; c < linha.length; c++) {
+      var texto = normalizarTexto(linha[c]);
+      if (texto === 'matricula') colMatricula = c + 1;
+      else if (texto === 'dataagendamento') colDataAgendamento = c + 1;
+      else if (texto === 'data') colData = c + 1;
+      else if (texto === 'candidato') colCandidato = c + 1;
+    }
+
+    if (colMatricula !== -1 && colCandidato !== -1) {
+      return {
+        linhaCabecalho: l + 1,
+        colData: colData !== -1 ? colData : 1,
+        colDataAgendamento: colDataAgendamento !== -1 ? colDataAgendamento : Math.max(colMatricula - 1, 1),
+        colMatricula: colMatricula,
+        colCandidato: colCandidato
+      };
+    }
+  }
+
+  throw new Error('Não foi possível localizar o cabeçalho da tabela "principal" (colunas "Matricula"/"Candidato") na aba "Principal".');
+}
+
+/**
+ * Normaliza texto para comparação de cabeçalhos: minúsculas, sem
+ * acentos e sem espaços.
+ */
+function normalizarTexto(texto) {
+  return String(texto)
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .trim();
+}
+
+/**
+ * Retorna a última coluna com cabeçalho preenchido a partir da linha do
+ * cabeçalho da tabela (varre até 30 colunas), para saber até onde pintar
+ * o fundo alternado de cada linha.
+ */
+function obterUltimaColunaTabela(aba, linhaCabecalho) {
+  var largura = Math.min(30, aba.getMaxColumns());
+  var valoresCabecalho = aba.getRange(linhaCabecalho, 1, 1, largura).getValues()[0];
+  var ultima = 1;
+  for (var i = 0; i < valoresCabecalho.length; i++) {
+    if (String(valoresCabecalho[i]).trim() !== '') ultima = i + 1;
+  }
+  return ultima;
+}
+
+/**
+ * Aplica, para cada dia de agendamento, o fundo alternado (branco /
+ * #f6f6f6) em todas as colunas da tabela, e a mescla da coluna "Data"
+ * (data em cima, dia da semana embaixo). A alternância de cor continua
+ * a partir da cor da última linha já existente acima de "linhaInicio",
+ * em vez de sempre recomeçar do branco.
+ */
+function aplicarFormatacaoColunaData(aba, estrutura, agendamento, linhaInicio) {
+  var ultimaColuna = obterUltimaColunaTabela(aba, estrutura.linhaCabecalho);
+
+  var corAnterior = linhaInicio > estrutura.linhaCabecalho + 1
+    ? aba.getRange(linhaInicio - 1, estrutura.colData).getBackground()
+    : '#f6f6f6';
+
+  var linhaAtual = linhaInicio;
+
+  agendamento.forEach(function(item) {
+    var qtde = item.candidatos.length;
+    if (qtde === 0) return;
+
+    var corGrupo = corAnterior === '#f6f6f6' ? '#ffffff' : '#f6f6f6';
+    corAnterior = corGrupo;
+
+    aba.getRange(linhaAtual, 1, qtde, ultimaColuna).setBackground(corGrupo);
+
+    var dataFormatada = formatarDataSimples(item.data);
+    var diaSemanaFormatado = item.diaSemana.toLowerCase() + '-feira';
+
+    if (qtde === 1) {
+      var celulaUnica = aba.getRange(linhaAtual, estrutura.colData);
+      celulaUnica.setValue(dataFormatada + '\n' + diaSemanaFormatado);
+      celulaUnica.setVerticalAlignment('middle');
+      celulaUnica.setHorizontalAlignment('center');
+      celulaUnica.setFontWeight('bold');
+    } else {
+      var metadeSuperior = Math.ceil(qtde / 2);
+      var metadeInferior = qtde - metadeSuperior;
+
+      var rangeData = aba.getRange(linhaAtual, estrutura.colData, metadeSuperior, 1);
+      rangeData.merge();
+      rangeData.setValue(dataFormatada);
+      rangeData.setVerticalAlignment('bottom');
+      rangeData.setHorizontalAlignment('center');
+      rangeData.setFontWeight('bold');
+
+      var rangeDiaSemana = aba.getRange(linhaAtual + metadeSuperior, estrutura.colData, metadeInferior, 1);
+      rangeDiaSemana.merge();
+      rangeDiaSemana.setValue(diaSemanaFormatado);
+      rangeDiaSemana.setVerticalAlignment('top');
+      rangeDiaSemana.setHorizontalAlignment('center');
+      rangeDiaSemana.setFontWeight('normal');
+      rangeDiaSemana.setFontColor('#666666');
+    }
+
+    linhaAtual += qtde;
   });
 }
 
