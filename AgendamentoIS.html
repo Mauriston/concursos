@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Carlito:wght@400;700&family=Montserrat:wght@700&display=swap" rel="stylesheet">
+
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Carlito', sans-serif;
+      color: #333;
+      background-color: #f4f6f8;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    .header {
+      background-color: #050f41;
+      padding: 20px;
+      text-align: center;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+
+    .header img { max-height: 95px; }
+
+    .content-container {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+    }
+
+    .titulo {
+      font-family: 'Montserrat', sans-serif;
+      font-weight: 700;
+      color: #050f41;
+      font-size: 20px;
+      margin: 0 0 15px 0;
+    }
+
+    .resumo-box {
+      background-color: #fff;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 14px 18px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 28px;
+      font-size: 14px;
+      margin-bottom: 20px;
+    }
+
+    .resumo-item b { color: #050f41; }
+
+    .campo { margin-bottom: 20px; }
+
+    .campo label {
+      display: block;
+      font-weight: bold;
+      color: #050f41;
+      margin-bottom: 8px;
+    }
+
+    .campo input[type=number] {
+      width: 80px;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      font-size: 15px;
+    }
+
+    .dias-semana {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .dias-semana label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: normal;
+      background-color: #fff;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      padding: 8px 12px;
+      cursor: pointer;
+      margin-bottom: 0;
+    }
+
+    .mensagem-erro {
+      background-color: #fdecea;
+      border: 1px solid #f5c2c0;
+      color: #8a1f1f;
+      border-radius: 8px;
+      padding: 14px;
+      line-height: 1.5;
+    }
+
+    .lista-agendamento {
+      background-color: #fff;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 16px;
+      font-size: 14px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+    }
+
+    .footer-actions {
+      padding: 15px 20px;
+      background-color: #fff;
+      border-top: 1px solid #ddd;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .btn {
+      font-family: 'Montserrat', sans-serif;
+      font-weight: 700;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: opacity 0.2s;
+    }
+
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn:hover:not(:disabled) { opacity: 0.8; }
+    .btn-primary { background-color: #050f41; color: #fff; }
+    .btn-secondary { background-color: #e0e0e0; color: #333; }
+
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <img src="https://i.imgur.com/nZ3c8JO.png" alt="Logo Marinha">
+  </div>
+
+  <div class="content-container">
+
+    <div class="resumo-box">
+      <div class="resumo-item"><b>Total de candidatos:</b> <span id="resumo-total"></span></div>
+      <div class="resumo-item"><b>Período de agendamento:</b> <span id="resumo-periodo"></span></div>
+      <div class="resumo-item"><b>Dias úteis disponíveis:</b> <span id="resumo-dias"></span></div>
+    </div>
+
+    <div id="tela-formulario">
+      <h2 class="titulo">Configurar Agendamento</h2>
+
+      <div class="campo">
+        <label for="input-quantidade">Quantas IS deseja agendar por dia?</label>
+        <input type="number" id="input-quantidade" min="1" max="99" value="1">
+      </div>
+
+      <div class="campo">
+        <label>Quais dias da semana serão utilizados?</label>
+        <div class="dias-semana">
+          <label><input type="checkbox" class="check-dia" value="Segunda" checked> Segunda</label>
+          <label><input type="checkbox" class="check-dia" value="Terça" checked> Terça</label>
+          <label><input type="checkbox" class="check-dia" value="Quarta" checked> Quarta</label>
+          <label><input type="checkbox" class="check-dia" value="Quinta" checked> Quinta</label>
+          <label><input type="checkbox" class="check-dia" value="Sexta" checked> Sexta</label>
+        </div>
+      </div>
+
+      <div id="tela-inviavel" hidden>
+        <div class="mensagem-erro" id="texto-inviavel"></div>
+      </div>
+    </div>
+
+    <div id="tela-viavel" hidden>
+      <h2 class="titulo">Datas de Agendamento</h2>
+      <div class="lista-agendamento" id="texto-viavel"></div>
+    </div>
+
+  </div>
+
+  <div class="footer-actions">
+    <button class="btn btn-secondary" onclick="google.script.host.close()">Cancelar</button>
+    <button class="btn btn-primary" id="btn-acao" onclick="verificarDatas()">Verificar datas</button>
+  </div>
+
+  <script>
+    var CONTEXTO = <?!= JSON.stringify(contexto) ?>;
+    var ultimaQuantidade = null;
+    var ultimosDias = null;
+    var btnAcao = document.getElementById('btn-acao');
+
+    window.onload = function() {
+      document.getElementById('resumo-total').innerText = CONTEXTO.totalCandidatos;
+      document.getElementById('resumo-periodo').innerText = CONTEXTO.periodoInicioFormatado + ' - ' + CONTEXTO.periodoFimFormatado;
+      document.getElementById('resumo-dias').innerText = CONTEXTO.diasUteisDisponiveis;
+    };
+
+    function diasSelecionados() {
+      var checks = document.querySelectorAll('.check-dia:checked');
+      return Array.prototype.map.call(checks, function(c) { return c.value; });
+    }
+
+    function verificarDatas() {
+      var quantidade = parseInt(document.getElementById('input-quantidade').value, 10);
+      var dias = diasSelecionados();
+
+      if (!quantidade || quantidade < 1) {
+        alert('Informe uma quantidade válida de IS por dia.');
+        return;
+      }
+      if (dias.length === 0) {
+        alert('Selecione ao menos um dia da semana.');
+        return;
+      }
+
+      ultimaQuantidade = quantidade;
+      ultimosDias = dias;
+
+      document.getElementById('tela-inviavel').hidden = true;
+      btnAcao.disabled = true;
+      btnAcao.innerText = 'Verificando...';
+
+      google.script.run
+        .withSuccessHandler(mostrarResultadoVerificacao)
+        .withFailureHandler(tratarErro)
+        .verificarViabilidadeAgendamento(quantidade, dias);
+    }
+
+    function tratarErro(erro) {
+      btnAcao.disabled = false;
+      btnAcao.innerText = 'Verificar datas';
+      alert(erro.message || String(erro));
+    }
+
+    function mostrarResultadoVerificacao(resultado) {
+      btnAcao.disabled = false;
+
+      if (!resultado.viavel) {
+        btnAcao.innerText = 'Verificar datas';
+        document.getElementById('tela-formulario').hidden = false;
+        document.getElementById('tela-viavel').hidden = true;
+        document.getElementById('tela-inviavel').hidden = false;
+        document.getElementById('texto-inviavel').innerText = resultado.mensagem;
+        return;
+      }
+
+      document.getElementById('tela-formulario').hidden = true;
+      document.getElementById('tela-viavel').hidden = false;
+
+      var linhas = resultado.agendamento.map(function(item) {
+        return item.dataFormatada + ' (' + item.diaSemana + '): ' + item.candidatos.join(', ');
+      });
+      document.getElementById('texto-viavel').innerText = linhas.join('\n\n');
+
+      btnAcao.innerText = 'Confirmar agendamentos e minutar MSG';
+      btnAcao.onclick = confirmarAgendamentos;
+    }
+
+    function confirmarAgendamentos() {
+      btnAcao.disabled = true;
+      btnAcao.innerText = 'Confirmando...';
+
+      google.script.run
+        .withSuccessHandler(function() { google.script.host.close(); })
+        .withFailureHandler(function(erro) {
+          btnAcao.disabled = false;
+          btnAcao.innerText = 'Confirmar agendamentos e minutar MSG';
+          alert(erro.message || String(erro));
+        })
+        .confirmarAgendamentos(ultimaQuantidade, ultimosDias);
+    }
+  </script>
+</body>
+</html>
