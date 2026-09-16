@@ -838,11 +838,17 @@ function calcularDiasUteis(dataInicial, dataFinal) {
 }
 
 /**
- * Grava as datas úteis calculadas na aba "schedulingDates" (coluna A),
+ * Nomes dos dias da semana em pt-BR, no índice retornado por Date#getDay()
+ * (0 = Domingo ... 6 = Sábado). calcularDiasUteis() só gera dias úteis
+ * (segunda a sexta), então na prática só os índices 1 a 5 são usados aqui.
+ */
+var NOMES_DIAS_SEMANA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+
+/**
+ * Grava as datas úteis calculadas na aba "schedulingDates": a data em si
+ * na coluna A e o nome do dia da semana (Segunda...Sexta) na coluna B,
  * preservando o status "active" (coluna C) de datas já existentes e sem
- * duplicar datas. A coluna B (weekDay) nunca é escrita pelo script: ela
- * já tem sua própria fórmula MAP+LAMBDA (configurada diretamente na
- * planilha) que preenche o dia da semana a partir da coluna A.
+ * duplicar datas.
  */
 function gravarDatasAgendamento(ss, diasUteis) {
   var aba = ss.getSheetByName('schedulingDates');
@@ -870,24 +876,25 @@ function gravarDatasAgendamento(ss, diasUteis) {
   var chaves = Object.keys(mapaAtivo).sort();
 
   if (ultimaLinha >= 2) {
-    aba.getRange(2, 1, ultimaLinha - 1, 1).clearContent();
+    aba.getRange(2, 1, ultimaLinha - 1, 2).clearContent();
     aba.getRange(2, 3, ultimaLinha - 1, 1).clearContent();
   }
 
   if (chaves.length > 0) {
-    var linhasData = chaves.map(function(chave) {
+    var linhasDataDia = chaves.map(function(chave) {
       var p = chave.split('-');
       // Meio-dia (em vez de meia-noite) evita que o deslocamento de fuso
       // horário entre a interpretação UTC do runtime V8 e o fuso da
       // planilha (America/Recife) empurre a data para o dia anterior ao
       // ser exibida (ex.: segunda-feira aparecendo como domingo).
-      return [new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]), 12, 0, 0)];
+      var data = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]), 12, 0, 0);
+      return [data, NOMES_DIAS_SEMANA[data.getDay()]];
     });
     var linhasAtivo = chaves.map(function(chave) {
       return [mapaAtivo[chave]];
     });
 
-    aba.getRange(2, 1, linhasData.length, 1).setValues(linhasData);
+    aba.getRange(2, 1, linhasDataDia.length, 2).setValues(linhasDataDia);
     aba.getRange(2, 3, linhasAtivo.length, 1).setValues(linhasAtivo);
   }
 
