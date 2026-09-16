@@ -551,15 +551,15 @@ function normalizarTextoComCandidatos(texto, candidatos) {
 }
 
 /**
- * Grava novos candidatos na aba "examinee" (colunas ID e examinee) e
+ * Grava novos candidatos na aba "candidatos" (colunas id e candidato) e
  * reordena TODAS as linhas (novas e já existentes) em ordem alfabética
  * crescente pelo nome. Retorna a quantidade de novos candidatos e a lista
  * completa já ordenada (usada em seguida para sincronizar
- * "examineedataBase" na mesma ordem).
+ * "candidatosDataBase" na mesma ordem).
  */
 function gravarExaminee(ss, candidatos) {
-  var aba = ss.getSheetByName('examinee');
-  if (!aba) throw new Error('Aba "examinee" não encontrada.');
+  var aba = ss.getSheetByName('candidatos');
+  if (!aba) throw new Error('Aba "candidatos" não encontrada.');
 
   var existentes = lerParesIdNome(aba);
   var idsExistentes = {};
@@ -608,17 +608,19 @@ function lerParesIdNome(aba) {
 }
 
 /**
- * Reescreve a coluna ID da aba "examineedataBase" seguindo exatamente a
- * mesma ordem de "listaOrdenada" (a lista já ordenada de "examinee"),
+ * Reescreve a coluna id da aba "candidatosDataBase" seguindo exatamente a
+ * mesma ordem de "listaOrdenada" (a lista já ordenada de "candidatos"),
  * preservando os dados das demais colunas de cada candidato já existente
  * e deixando em branco as colunas de candidatos novos. Elimina linhas
  * órfãs/em branco que causavam o início dos dados fora da linha 2.
  */
 function gravarExamineeDataBase(ss, listaOrdenada) {
-  var aba = ss.getSheetByName('examineedataBase');
-  if (!aba) throw new Error('Aba "examineedataBase" não encontrada.');
+  var aba = ss.getSheetByName('candidatosDataBase');
+  if (!aba) throw new Error('Aba "candidatosDataBase" não encontrada.');
 
-  var NUM_COLUNAS = 9; // id + 8 colunas de dados (schedulingDate ... appealRequestUrl)
+  // id + 9 colunas de dados (dataAgendamento, reagendamento, status,
+  // finalizado, recurso, dataLaudo, Laudo, nº TIS, termoRecursoUrl)
+  var NUM_COLUNAS = 10;
   var ultimaLinha = aba.getLastRow();
   var dadosPorId = {};
 
@@ -641,7 +643,7 @@ function gravarExamineeDataBase(ss, listaOrdenada) {
   });
 
   // Preserva (ao final) qualquer ID com dados que não esteja na lista de
-  // "examinee", em vez de descartar silenciosamente.
+  // "candidatos", em vez de descartar silenciosamente.
   Object.keys(dadosPorId).forEach(function(id) {
     if (!idsNaLista[id]) {
       linhasFinais.push([id].concat(dadosPorId[id]));
@@ -660,11 +662,11 @@ function gravarExamineeDataBase(ss, listaOrdenada) {
 
 /**
  * Insere o registro da mensagem na primeira linha de dados da aba
- * "messages" (logo abaixo do cabeçalho), usando a Data-Hora como ID único.
+ * "mensagens" (logo abaixo do cabeçalho), usando a Data-Hora como ID único.
  */
 function gravarMensagem(ss, dadosMsg, urlArquivo) {
-  var aba = ss.getSheetByName('messages');
-  if (!aba) throw new Error('Aba "messages" não encontrada.');
+  var aba = ss.getSheetByName('mensagens');
+  if (!aba) throw new Error('Aba "mensagens" não encontrada.');
 
   var idsExistentes = coletarIdsExistentes(aba);
   if (idsExistentes[dadosMsg.dataHora]) {
@@ -702,7 +704,7 @@ function coletarIdsExistentes(aba) {
 
 
 // =========================================================================
-// DATAS DE AGENDAMENTO (schedulingDates): PERÍODO JRS, DIAS ÚTEIS E FERIADOS
+// DATAS DE AGENDAMENTO (agendamentos): PERÍODO JRS, DIAS ÚTEIS E FERIADOS
 // =========================================================================
 
 /**
@@ -845,14 +847,14 @@ function calcularDiasUteis(dataInicial, dataFinal) {
 var NOMES_DIAS_SEMANA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
 /**
- * Grava as datas úteis calculadas na aba "schedulingDates": a data em si
- * na coluna A e o nome do dia da semana (Segunda...Sexta) na coluna B,
- * preservando o status "active" (coluna C) de datas já existentes e sem
- * duplicar datas.
+ * Grava as datas úteis calculadas na aba "agendamentos": a data em si
+ * na coluna "data" e o nome do dia da semana (Segunda...Sexta) na coluna
+ * "diaDaSemana", preservando o status "ativa" de datas já existentes e
+ * sem duplicar datas.
  */
 function gravarDatasAgendamento(ss, diasUteis) {
-  var aba = ss.getSheetByName('schedulingDates');
-  if (!aba) throw new Error('Aba "schedulingDates" não encontrada.');
+  var aba = ss.getSheetByName('agendamentos');
+  if (!aba) throw new Error('Aba "agendamentos" não encontrada.');
 
   var ultimaLinha = aba.getLastRow();
   var mapaAtivo = {};
@@ -916,7 +918,7 @@ function abrirModalAgendamento() {
   var pendentes = listarCandidatosPendentesAgendamento(ss);
 
   if (pendentes.length === 0) {
-    mostrarAlertaGenerico('Aviso', 'Não há candidatos pendentes de agendamento (todos já têm uma data em "schedulingDate", em "examineedataBase").');
+    mostrarAlertaGenerico('Aviso', 'Não há candidatos pendentes de agendamento (todos já têm uma data em "dataAgendamento", em "candidatosDataBase").');
     return;
   }
 
@@ -941,16 +943,16 @@ function abrirModalAgendamento() {
 }
 
 /**
- * Lista os candidatos de "examineedataBase" que ainda não têm uma data
- * em "schedulingDate", já com o nome (de "examinee") anexado. A ordem
- * segue a mesma ordem de "examineedataBase" (que espelha "examinee",
+ * Lista os candidatos de "candidatosDataBase" que ainda não têm uma data
+ * em "dataAgendamento", já com o nome (de "candidatos") anexado. A ordem
+ * segue a mesma ordem de "candidatosDataBase" (que espelha "candidatos",
  * já ordenada alfabeticamente por nome).
  */
 function listarCandidatosPendentesAgendamento(ss) {
-  var abaDataBase = ss.getSheetByName('examineedataBase');
-  var abaExaminee = ss.getSheetByName('examinee');
-  if (!abaDataBase) throw new Error('Aba "examineedataBase" não encontrada.');
-  if (!abaExaminee) throw new Error('Aba "examinee" não encontrada.');
+  var abaDataBase = ss.getSheetByName('candidatosDataBase');
+  var abaExaminee = ss.getSheetByName('candidatos');
+  if (!abaDataBase) throw new Error('Aba "candidatosDataBase" não encontrada.');
+  if (!abaExaminee) throw new Error('Aba "candidatos" não encontrada.');
 
   var mapaNomes = {};
   lerParesIdNome(abaExaminee).forEach(function(c) { mapaNomes[c.id] = c.nome; });
@@ -971,12 +973,12 @@ function listarCandidatosPendentesAgendamento(ss) {
 }
 
 /**
- * Lista as datas presentes em "schedulingDates" (colunas A e B),
- * em ordem crescente.
+ * Lista as datas presentes em "agendamentos" (colunas "data" e
+ * "diaDaSemana"), em ordem crescente.
  */
 function listarDatasDisponiveis(ss) {
-  var aba = ss.getSheetByName('schedulingDates');
-  if (!aba) throw new Error('Aba "schedulingDates" não encontrada.');
+  var aba = ss.getSheetByName('agendamentos');
+  if (!aba) throw new Error('Aba "agendamentos" não encontrada.');
 
   var ultimaLinha = aba.getLastRow();
   var datas = [];
@@ -994,13 +996,13 @@ function listarDatasDisponiveis(ss) {
 }
 
 /**
- * 2. Marca "active" (coluna C de "schedulingDates") como TRUE para as
+ * 2. Marca "ativa" (coluna C de "agendamentos") como TRUE para as
  *    datas cujo dia da semana está entre os selecionados, e FALSE para
  *    as demais, refletindo a configuração escolhida pelo usuário.
  */
 function ativarDatasPorDiaSemana(ss, diasSemanaSelecionados) {
-  var aba = ss.getSheetByName('schedulingDates');
-  if (!aba) throw new Error('Aba "schedulingDates" não encontrada.');
+  var aba = ss.getSheetByName('agendamentos');
+  if (!aba) throw new Error('Aba "agendamentos" não encontrada.');
 
   var ultimaLinha = aba.getLastRow();
   if (ultimaLinha < 2) return;
@@ -1042,7 +1044,7 @@ function verificarViabilidadeAgendamento(quantidadePorDia, diasSemanaSelecionado
     return diasSemanaSelecionados.indexOf(d.diaSemana) !== -1;
   });
   if (datas.length === 0) {
-    return { viavel: false, mensagem: 'Nenhuma das datas disponíveis em "schedulingDates" cai nos dias da semana selecionados.' };
+    return { viavel: false, mensagem: 'Nenhuma das datas disponíveis em "agendamentos" cai nos dias da semana selecionados.' };
   }
 
   var capacidadeTotal = datas.length * quantidadePorDia;
@@ -1094,8 +1096,8 @@ function distribuirCandidatosNasDatas(candidatos, datas, quantidadePorDia) {
  * 4. Confirma o agendamento: recalcula a mesma distribuição (determinística
  *    a partir dos mesmos parâmetros já validados em
  *    verificarViabilidadeAgendamento), grava a data de cada candidato na
- *    coluna "schedulingDate" de "examineedataBase" e exibe o modal com a
- *    minuta da mensagem de agendamento.
+ *    coluna "dataAgendamento" de "candidatosDataBase" e exibe o modal com
+ *    a minuta da mensagem de agendamento.
  *    Chamada via google.script.run a partir de AgendamentoIS.html.
  */
 function confirmarAgendamentos(quantidadePorDia, diasSemanaSelecionados) {
@@ -1129,12 +1131,12 @@ function confirmarAgendamentos(quantidadePorDia, diasSemanaSelecionados) {
 
 /**
  * Grava, para cada candidato agendado, a data escolhida na coluna
- * "schedulingDate" (coluna B) de "examineedataBase", localizando a linha
- * pelo "id".
+ * "dataAgendamento" (coluna B) de "candidatosDataBase", localizando a
+ * linha pelo "id".
  */
 function gravarDatasAgendamentoCandidatos(ss, agendamento) {
-  var aba = ss.getSheetByName('examineedataBase');
-  if (!aba) throw new Error('Aba "examineedataBase" não encontrada.');
+  var aba = ss.getSheetByName('candidatosDataBase');
+  if (!aba) throw new Error('Aba "candidatosDataBase" não encontrada.');
 
   var ultimaLinha = aba.getLastRow();
   if (ultimaLinha < 2) return;
@@ -1162,10 +1164,10 @@ function gravarDatasAgendamentoCandidatos(ss, agendamento) {
  * agendadas conforme:
  *
  * UNO - {{1º dia}} às 7h30:
- * - id examinee;
+ * - id candidato;
  * ...
- * - id examinee; e
- * - id examinee.
+ * - id candidato; e
+ * - id candidato.
  *
  * DOIS - {{2º dia}} às 7h30:
  * ...
@@ -1200,18 +1202,18 @@ function gerarTextoMinutaAgendamento(ss, agendamento) {
 }
 
 /**
- * Localiza, na aba "messages", a mensagem mais recente com propósito
+ * Localiza, na aba "mensagens", a mensagem mais recente com propósito
  * "Apresentação e IS" (a mensagem inicial de apresentação de candidatos),
  * retornando seu ID (Data-Hora) e o Assunto.
  */
 function obterDadosMensagemInicial(ss) {
-  var aba = ss.getSheetByName('messages');
-  if (!aba) throw new Error('Aba "messages" não encontrada.');
+  var aba = ss.getSheetByName('mensagens');
+  if (!aba) throw new Error('Aba "mensagens" não encontrada.');
 
   var ultimaLinha = aba.getLastRow();
   if (ultimaLinha < 2) return null;
 
-  var dados = aba.getRange(2, 1, ultimaLinha - 1, 7).getValues(); // id, fileUrl, purpose, sender, recipient, info, subject
+  var dados = aba.getRange(2, 1, ultimaLinha - 1, 7).getValues(); // dataHora, fileUrl, proposito, remetente, destinatario, informacao, assunto
   for (var i = 0; i < dados.length; i++) {
     if (String(dados[i][2]).trim() === 'Apresentação e IS') {
       return { dataHora: String(dados[i][0]).trim(), subject: String(dados[i][6]).trim() };
