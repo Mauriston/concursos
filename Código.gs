@@ -130,7 +130,9 @@ function abrirModal() {
   var textoCompleto = texto.join('\n');
   var htmlTemplate = HtmlService.createTemplateFromFile('Modal');
   htmlTemplate.textoFinal = textoCompleto;
-  
+  htmlTemplate.titulo = 'Minuta Gerada';
+  htmlTemplate.fecharComAlerta = true;
+
   var htmlOutput = htmlTemplate.evaluate()
     .setWidth(750)
     .setHeight(800)
@@ -1121,6 +1123,8 @@ function confirmarAgendamentos(quantidadePorDia, diasSemanaSelecionados) {
 
   var htmlTemplate = HtmlService.createTemplateFromFile('Modal');
   htmlTemplate.textoFinal = textoMinuta;
+  htmlTemplate.titulo = 'MENSAGEM DE AGENDAMENTOS DA IS - Minuta gerada';
+  htmlTemplate.fecharComAlerta = false;
 
   var htmlOutput = htmlTemplate.evaluate()
     .setWidth(750)
