@@ -840,7 +840,9 @@ function calcularDiasUteis(dataInicial, dataFinal) {
 /**
  * Grava as datas úteis calculadas na aba "schedulingDates" (coluna A),
  * preservando o status "active" (coluna C) de datas já existentes e sem
- * duplicar datas. Garante também a fórmula MAP+LAMBDA da coluna B (weekDay).
+ * duplicar datas. A coluna B (weekDay) nunca é escrita pelo script: ela
+ * já tem sua própria fórmula MAP+LAMBDA (configurada diretamente na
+ * planilha) que preenche o dia da semana a partir da coluna A.
  */
 function gravarDatasAgendamento(ss, diasUteis) {
   var aba = ss.getSheetByName('schedulingDates');
@@ -889,18 +891,5 @@ function gravarDatasAgendamento(ss, diasUteis) {
     aba.getRange(2, 3, linhasAtivo.length, 1).setValues(linhasAtivo);
   }
 
-  garantirFormulaWeekDay(aba);
-
   return chaves.length - totalAntes;
-}
-
-/**
- * Garante que a coluna B (weekDay) tenha a fórmula MAP+LAMBDA que calcula
- * o dia da semana de cada data preenchida na coluna A.
- */
-function garantirFormulaWeekDay(aba) {
-  var celula = aba.getRange('B2');
-  if (!celula.getFormula()) {
-    celula.setFormula('=MAP(A2:A, LAMBDA(d, IF(d="", "", WEEKDAY(d))))');
-  }
 }
