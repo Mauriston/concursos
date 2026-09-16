@@ -91,7 +91,7 @@
   </div>
 
   <div class="content-container">
-    <h3 class="bold-title" style="color: #050f41;">Minuta Gerada</h3>
+    <h3 class="bold-title" style="color: #050f41;" id="titulo-minuta"></h3>
     <div class="minuta-box" id="minuta-visual">Carregando minuta...</div>
   </div>
 
@@ -107,8 +107,11 @@
 
   <script>
     var textoPronto = <?!= JSON.stringify(textoFinal) ?>;
+    var tituloModal = <?!= JSON.stringify(titulo) ?>;
+    var fecharComAlerta = <?!= JSON.stringify(fecharComAlerta) ?>;
 
     window.onload = function() {
+      document.getElementById('titulo-minuta').innerText = tituloModal;
       document.getElementById('minuta-visual').innerText = textoPronto;
       document.getElementById('texto-cru').value = textoPronto;
     };
@@ -136,6 +139,10 @@
     }
 
     function fecharModal() {
+      if (!fecharComAlerta) {
+        google.script.host.close();
+        return;
+      }
       google.script.run
         .withSuccessHandler(function() {
           google.script.host.close();
