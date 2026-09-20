@@ -625,15 +625,15 @@ function obterCandidatosPorStatus(ss) {
   var ultimaLinha = abaDataBase.getLastRow();
   if (ultimaLinha < 2) return resultado;
 
-  abaDataBase.getRange(2, 1, ultimaLinha - 1, 10).getValues().forEach(function(linha) {
+  abaDataBase.getRange(2, 1, ultimaLinha - 1, 11).getValues().forEach(function(linha) {
     var id = String(linha[0]).trim();
     if (!id) return;
     resultado.total++;
 
     var nome = mapaNomes[id] || '';
     var status = String(linha[3]).trim().toUpperCase();
-    var recurso = linha[5] === true;
-    var dataLaudo = linha[6];
+    var recurso = linha[6] === true;
+    var dataLaudo = linha[7];
     var item = '- ' + id + '  ' + nome;
 
     if (status === 'APTO') resultado.aptos.push(item);
@@ -668,10 +668,10 @@ function listarCandidatosNaoFinalizados(ss) {
   var ultimaLinha = abaDataBase.getLastRow();
   if (ultimaLinha < 2) return pendentes;
 
-  abaDataBase.getRange(2, 1, ultimaLinha - 1, 5).getValues().forEach(function(linha) {
+  abaDataBase.getRange(2, 1, ultimaLinha - 1, 6).getValues().forEach(function(linha) {
     var id = String(linha[0]).trim();
     if (!id) return;
-    var finalizado = linha[4] === true;
+    var finalizado = linha[5] === true;
     if (!finalizado) pendentes.push({ id: id, nome: mapaNomes[id] || '' });
   });
 
@@ -689,9 +689,10 @@ function gravarExamineeDataBase(ss, listaOrdenada) {
   var aba = ss.getSheetByName('candidatosDataBase');
   if (!aba) throw new Error('Aba "candidatosDataBase" não encontrada.');
 
-  // id + 9 colunas de dados (dataAgendamento, reagendamento, status,
-  // finalizado, recurso, dataLaudo, Laudo, nº TIS, termoRecursoUrl)
-  var NUM_COLUNAS = 10;
+  // id + 10 colunas de dados (dataAgendamento, reagendamento, status,
+  // Observações, finalizado, recurso, dataLaudo, Laudo, nº TIS,
+  // termoRecursoUrl)
+  var NUM_COLUNAS = 11;
   var ultimaLinha = aba.getLastRow();
   var dadosPorId = {};
 
@@ -1664,13 +1665,14 @@ function instalarGatilhoOnEditPrincipal() {
     .onEdit()
     .create();
 
-  mostrarAlertaGenerico('Automação ativada', 'A partir de agora, edições de <b>Status</b> e <b>Nº TIS</b> na tabela Principal serão sincronizadas automaticamente com "candidatosDataBase".');
+  mostrarAlertaGenerico('Automação ativada', 'A partir de agora, edições de <b>Status</b>, <b>Observações</b> e <b>Nº TIS</b> na tabela Principal serão sincronizadas automaticamente com "candidatosDataBase".');
 }
 
 /**
  * Gatilho onEdit instalável (ver instalarGatilhoOnEditPrincipal). Só age
  * sobre edições de uma única célula, dentro das linhas de dados da tabela
- * "principal" (aba "Principal"), nas colunas "Status" e "Nº TIS".
+ * "principal" (aba "Principal"), nas colunas "Status", "Observações" e
+ * "Nº TIS".
  */
 function aoEditarPrincipalInstalavel(e) {
   if (!e || !e.range) return;
@@ -1692,6 +1694,8 @@ function aoEditarPrincipalInstalavel(e) {
 
   if (coluna === estrutura.colNumTIS) {
     sincronizarNumTISPrincipal(aba, estrutura, linha, e.value);
+  } else if (coluna === estrutura.colObservacoes) {
+    sincronizarObservacoesPrincipal(aba, estrutura, linha, e.value);
   } else if (coluna === estrutura.colStatus) {
     processarEdicaoStatusPrincipal(aba, estrutura, linha, e);
   }
@@ -1714,7 +1718,7 @@ function localizarLinhaCandidatosDataBasePorId(aba, id) {
 
 /**
  * Sincroniza a edição da coluna "Nº TIS" da tabela "principal" para a
- * coluna "nº TIS" (coluna I) de "candidatosDataBase". Uma célula limpa
+ * coluna "nº TIS" (coluna J) de "candidatosDataBase". Uma célula limpa
  * também limpa o valor em "candidatosDataBase".
  */
 function sincronizarNumTISPrincipal(aba, estrutura, linha, novoValor) {
@@ -1727,7 +1731,25 @@ function sincronizarNumTISPrincipal(aba, estrutura, linha, novoValor) {
   var linhaDataBase = localizarLinhaCandidatosDataBasePorId(abaDataBase, id);
   if (linhaDataBase === -1) return;
 
-  abaDataBase.getRange(linhaDataBase, 9).setValue(novoValor || '');
+  abaDataBase.getRange(linhaDataBase, 10).setValue(novoValor || '');
+}
+
+/**
+ * Sincroniza a edição da coluna "Observações" da tabela "principal" para
+ * a coluna "Observações" (coluna E) de "candidatosDataBase". Uma célula
+ * limpa também limpa o valor em "candidatosDataBase".
+ */
+function sincronizarObservacoesPrincipal(aba, estrutura, linha, novoValor) {
+  var id = String(aba.getRange(linha, estrutura.colMatricula).getValue()).trim();
+  if (!id) return;
+
+  var abaDataBase = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('candidatosDataBase');
+  if (!abaDataBase) return;
+
+  var linhaDataBase = localizarLinhaCandidatosDataBasePorId(abaDataBase, id);
+  if (linhaDataBase === -1) return;
+
+  abaDataBase.getRange(linhaDataBase, 5).setValue(novoValor || '');
 }
 
 /**
@@ -1762,18 +1784,18 @@ function processarEdicaoStatusPrincipal(aba, estrutura, linha, e) {
 
   if (!novoValor) {
     abaDataBase.getRange(linhaDataBase, 4).setValue('');
-    abaDataBase.getRange(linhaDataBase, 5).setValue(false);
-    abaDataBase.getRange(linhaDataBase, 7).setValue('');
+    abaDataBase.getRange(linhaDataBase, 6).setValue(false);
     abaDataBase.getRange(linhaDataBase, 8).setValue('');
+    abaDataBase.getRange(linhaDataBase, 9).setValue('');
     if (estrutura.colDataLaudo !== -1) aba.getRange(linha, estrutura.colDataLaudo).setValue('');
     return;
   }
 
   if (novoValor === 'PENDENTE') {
     abaDataBase.getRange(linhaDataBase, 4).setValue('Pendente');
-    abaDataBase.getRange(linhaDataBase, 5).setValue(false);
-    abaDataBase.getRange(linhaDataBase, 7).setValue('');
+    abaDataBase.getRange(linhaDataBase, 6).setValue(false);
     abaDataBase.getRange(linhaDataBase, 8).setValue('');
+    abaDataBase.getRange(linhaDataBase, 9).setValue('');
     if (estrutura.colDataLaudo !== -1) aba.getRange(linha, estrutura.colDataLaudo).setValue('');
     return;
   }
@@ -1799,9 +1821,9 @@ function processarEdicaoStatusPrincipal(aba, estrutura, linha, e) {
   }
 
   abaDataBase.getRange(linhaDataBase, 4).setValue(novoValor);
-  abaDataBase.getRange(linhaDataBase, 5).setValue(true);
-  abaDataBase.getRange(linhaDataBase, 7).setValue(hoje);
-  abaDataBase.getRange(linhaDataBase, 8).setValue(laudoTexto);
+  abaDataBase.getRange(linhaDataBase, 6).setValue(true);
+  abaDataBase.getRange(linhaDataBase, 8).setValue(hoje);
+  abaDataBase.getRange(linhaDataBase, 9).setValue(laudoTexto);
   if (estrutura.colDataLaudo !== -1) aba.getRange(linha, estrutura.colDataLaudo).setValue(hoje);
 
   if (novoValor === 'INAPTO') {
@@ -1842,8 +1864,8 @@ function gerarTermoRecursoIndividual(id) {
   var linhaDataBase = localizarLinhaCandidatosDataBasePorId(abaDataBase, id);
   if (linhaDataBase === -1) return;
 
-  var dadosDataBase = abaDataBase.getRange(linhaDataBase, 1, 1, 10).getValues()[0];
-  var dataLaudo = formatarDataSimples(dadosDataBase[6]); // coluna G: dataLaudo
+  var dadosDataBase = abaDataBase.getRange(linhaDataBase, 1, 1, 11).getValues()[0];
+  var dataLaudo = formatarDataSimples(dadosDataBase[7]); // coluna H: dataLaudo
 
   var nomeConcursoBruto = abaPrincipal ? (abaPrincipal.getRange('F3').getValue() || 'NÃO INFORMADO') : 'NÃO INFORMADO';
   var nomeConcurso = String(nomeConcursoBruto).replace(/CONCURSO\s+/i, '');
@@ -1878,8 +1900,8 @@ function gerarTermoRecursoIndividual(id) {
     docCopia.setTrashed(true);
   }
 
-  abaDataBase.getRange(linhaDataBase, 6).setValue(true);
-  abaDataBase.getRange(linhaDataBase, 10).setValue(arquivoPdf.getUrl());
+  abaDataBase.getRange(linhaDataBase, 7).setValue(true);
+  abaDataBase.getRange(linhaDataBase, 11).setValue(arquivoPdf.getUrl());
 
   mostrarAlertaGenerico(
     'Termo Gerado',
