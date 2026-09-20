@@ -407,36 +407,3 @@ ECHO - Candidatos que interpuseram recurso... (total: N): BT
   República, Consciência Negra, Natal) + móveis calculados a partir da
   Páscoa (Carnaval, Quarta de Cinzas, Sexta-feira Santa, Corpus
   Christi).
-
----
-
-## 8. API Web (doGet/doPost) — integração com o app externo
-
-Além do uso via menu na própria planilha, o projeto expõe uma **API
-Web** (implantação como "Aplicativo da web", `doGet`/`doPost`),
-consumida pelo app `DoencasEPareceresJRS` (menu **Concursos**, gated a
-admin/HNRe), que reimplementa a tela da aba Principal como um CRUD web
-independente. `candidatosDataBase`/`candidatos` são o backend real; a
-aba "Principal" não é escrita por essa API (só pela planilha).
-
-Todas as funções da API usam `SpreadsheetApp.openById(SPREADSHEET_ID_API)`
-— nunca `getActiveSpreadsheet()`/`getUi()`, que não funcionam numa
-requisição HTTP sem sessão de UI. Respostas sempre no formato
-`{ sucesso: true, dados }` ou `{ sucesso: false, erro }`.
-
-| Método | `action` | Corpo/parâmetros | Função | Efeito |
-|---|---|---|---|---|
-| GET | `listarCandidatos` | — | `apiListarCandidatos()` | Lista todos os candidatos de `candidatosDataBase` + nome de `candidatos` |
-| POST | `atualizarCandidato` | `{ id, status?, observacoes?, numTIS? }` | `apiAtualizarCandidato()` | Atualiza os campos presentes; `status` segue a mesma lógica de `processarEdicaoStatusPrincipal()` (finalizado/dataLaudo/Laudo), mas **sem** diálogos — a confirmação de INAPTO deve ser feita no front-end antes de chamar |
-| POST | `criarCandidato` | `{ id, nome }` | `apiCriarCandidato()` | Cadastra em `candidatos` (reordena alfabeticamente) e `candidatosDataBase`, via `gravarExaminee()`/`gravarExamineeDataBase()` |
-| POST | `gerarTermoRecurso` | `{ id }` | `apiGerarTermoRecurso()` → `gerarPdfTermoRecurso()` | Gera/reaproveita o Termo de Recurso; mesma lógica pura usada pelo fluxo INAPTO da planilha |
-
-Não há endpoint de exclusão (decisão deliberada — excluir um candidato
-haveria de mexer em várias abas ligadas; fica para um pedido futuro
-explícito).
-
-**Implantação (passo manual, único)**: no editor do Apps Script,
-`Implantar → Nova implantação → Aplicativo da web`, com "Executar
-como: Eu" e "Quem pode acessar: Qualquer pessoa". A URL gerada
-(`.../exec`) é o que o front-end do `DoencasEPareceresJRS` usa como
-`GAS_URL_CONCURSOS`.
