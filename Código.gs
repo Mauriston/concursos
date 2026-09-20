@@ -1730,34 +1730,33 @@ function processarEdicaoStatusPrincipal(aba, estrutura, linha, e) {
 /**
  * Gera o Termo de Cientificação de Recurso para um único candidato
  * (identificado por "id"), buscando os dados em "candidatos" e
- * "candidatosDataBase". Reaproveita um arquivo já existente na pasta
- * de Termos em vez de duplicá-lo. Ao final, marca a caixa de seleção
- * "recurso" como VERDADEIRO e grava a URL do PDF em "termoRecursoUrl"
- * (candidatosDataBase).
+ * "candidatosDataBase" de "ss". Reaproveita um arquivo já existente na
+ * pasta de Termos em vez de duplicá-lo. Ao final, marca a caixa de
+ * seleção "recurso" como VERDADEIRO e grava a URL do PDF em
+ * "termoRecursoUrl" (candidatosDataBase). Lógica pura (sem UI): lança
+ * Error em caso de problema e retorna { candidato, url }. Usada tanto
+ * pelo fluxo da planilha (gerarTermoRecursoIndividual) quanto pela API
+ * web (apiGerarTermoRecurso).
  */
-function gerarTermoRecursoIndividual(id) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+function gerarPdfTermoRecurso(ss, id) {
   var abaCandidatos = ss.getSheetByName('candidatos');
   var abaDataBase = ss.getSheetByName('candidatosDataBase');
-  var abaPrincipal = ss.getSheetByName('Principal');
-  if (!abaCandidatos || !abaDataBase) return;
+  if (!abaCandidatos || !abaDataBase) throw new Error('Abas "candidatos"/"candidatosDataBase" não encontradas.');
 
   var mapaNomes = {};
   lerParesIdNome(abaCandidatos).forEach(function(c) { mapaNomes[c.id] = c.nome; });
   var candidato = mapaNomes[id];
   if (!candidato) {
-    SpreadsheetApp.getUi().alert('Candidato com matrícula "' + id + '" não encontrado em "candidatos". Termo não gerado.');
-    return;
+    throw new Error('Candidato com matrícula "' + id + '" não encontrado em "candidatos". Termo não gerado.');
   }
 
   var linhaDataBase = localizarLinhaCandidatosDataBasePorId(abaDataBase, id);
-  if (linhaDataBase === -1) return;
+  if (linhaDataBase === -1) {
+    throw new Error('Candidato com matrícula "' + id + '" não encontrado em "candidatosDataBase". Termo não gerado.');
+  }
 
   var dadosDataBase = abaDataBase.getRange(linhaDataBase, 1, 1, 11).getValues()[0];
   var dataLaudo = formatarDataSimples(dadosDataBase[7]); // coluna H: dataLaudo
-
-  var nomeConcursoBruto = abaPrincipal ? (abaPrincipal.getRange('F3').getValue() || 'NÃO INFORMADO') : 'NÃO INFORMADO';
-  var nomeConcurso = String(nomeConcursoBruto).replace(/CONCURSO\s+/i, '');
 
   var idPastaPai = '1_dJV8HP1WFXa5lSV-p0V0N22_YXWIRDa';
   var subPasta = DriveApp.getFolderById(idPastaPai);
@@ -1792,9 +1791,270 @@ function gerarTermoRecursoIndividual(id) {
   abaDataBase.getRange(linhaDataBase, 7).setValue(true);
   abaDataBase.getRange(linhaDataBase, 11).setValue(arquivoPdf.getUrl());
 
+  return { candidato: candidato, url: arquivoPdf.getUrl() };
+}
+
+/**
+ * Wrapper com UI (alertas) de gerarPdfTermoRecurso(), usado pelo fluxo
+ * de edição da tabela Principal (Status = INAPTO, ver
+ * processarEdicaoStatusPrincipal).
+ */
+function gerarTermoRecursoIndividual(id) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var abaPrincipal = ss.getSheetByName('Principal');
+  var nomeConcursoBruto = abaPrincipal ? (abaPrincipal.getRange('F3').getValue() || 'NÃO INFORMADO') : 'NÃO INFORMADO';
+  var nomeConcurso = String(nomeConcursoBruto).replace(/CONCURSO\s+/i, '');
+
+  var resultado;
+  try {
+    resultado = gerarPdfTermoRecurso(ss, id);
+  } catch (erro) {
+    SpreadsheetApp.getUi().alert(erro.message);
+    return;
+  }
+
   mostrarAlertaGenerico(
     'Termo Gerado',
-    'Termo de Cientificação de Recurso gerado para <b>' + candidato + '</b> (' + nomeConcurso + ').<br><br>' +
-    '<a href="' + arquivoPdf.getUrl() + '" target="_blank">Abrir termo</a>'
+    'Termo de Cientificação de Recurso gerado para <b>' + resultado.candidato + '</b> (' + nomeConcurso + ').<br><br>' +
+    '<a href="' + resultado.url + '" target="_blank">Abrir termo</a>'
   );
+}
+
+
+// =========================================================================
+// API WEB (doGet/doPost) — CRUD de candidatos para o app externo
+// "DoencasEPareceresJRS" (menu "Concursos"). Implantar este projeto como
+// aplicativo da web (Implantar > Nova implantação > Aplicativo da web,
+// "Executar como: Eu", "Quem pode acessar: Qualquer pessoa") para obter
+// a URL a ser usada pelo app externo.
+//
+// Como é uma requisição HTTP (sem sessão de UI do Sheets), NUNCA usar
+// SpreadsheetApp.getActiveSpreadsheet()/getUi() aqui — sempre
+// SpreadsheetApp.openById(SPREADSHEET_ID_API), e erros viram
+// { sucesso: false, erro } em vez de alertas.
+// =========================================================================
+
+var SPREADSHEET_ID_API = '1stQCDN7Wbr7fBtEowAc2jeQoh7yYFbpw9SnMLa54nHY';
+
+/**
+ * Ponto de entrada GET do aplicativo da web. Roteia pela query string
+ * "action".
+ */
+function doGet(e) {
+  return apiResponder(function() {
+    var action = e && e.parameter ? e.parameter.action : '';
+    if (action === 'listarCandidatos') return apiListarCandidatos();
+    throw new Error('Ação GET desconhecida: "' + action + '".');
+  });
+}
+
+/**
+ * Ponto de entrada POST do aplicativo da web. Espera um corpo JSON com
+ * a propriedade "action".
+ */
+function doPost(e) {
+  return apiResponder(function() {
+    var corpo = {};
+    try {
+      corpo = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    } catch (erroJson) {
+      throw new Error('Corpo da requisição não é um JSON válido.');
+    }
+
+    var action = corpo.action;
+    if (action === 'atualizarCandidato') return apiAtualizarCandidato(corpo);
+    if (action === 'criarCandidato') return apiCriarCandidato(corpo);
+    if (action === 'gerarTermoRecurso') return apiGerarTermoRecurso(corpo);
+    throw new Error('Ação POST desconhecida: "' + action + '".');
+  });
+}
+
+/**
+ * Executa "fn", empacota o retorno em { sucesso: true, dados } ou,
+ * em caso de erro, { sucesso: false, erro: mensagem }, e devolve como
+ * JSON (ContentService), formato esperado pelo front-end.
+ */
+function apiResponder(fn) {
+  var resultado;
+  try {
+    resultado = { sucesso: true, dados: fn() };
+  } catch (erro) {
+    resultado = { sucesso: false, erro: erro.message };
+  }
+  return ContentService.createTextOutput(JSON.stringify(resultado))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * Formata um valor de data para "DD/MM/AAAA", ou string vazia se não
+ * for uma data válida (evita o placeholder "___/___/_____" de
+ * formatarDataSimples, que não faz sentido numa resposta de API).
+ */
+function formatarDataApiOuVazio(valor) {
+  if (Object.prototype.toString.call(valor) === '[object Date]' && !isNaN(valor.getTime())) {
+    return formatarDataSimples(valor);
+  }
+  return '';
+}
+
+/**
+ * Converte uma linha de "candidatosDataBase" (11 colunas) + o nome (de
+ * "candidatos") no objeto usado pelo front-end do CRUD.
+ */
+function linhaCandidatoParaApi(id, nome, linha) {
+  return {
+    id: id,
+    nome: nome,
+    dataAgendamento: formatarDataApiOuVazio(linha[1]),
+    status: String(linha[3] || '').trim(),
+    observacoes: String(linha[4] || '').trim(),
+    finalizado: linha[5] === true,
+    recurso: linha[6] === true,
+    dataLaudo: formatarDataApiOuVazio(linha[7]),
+    laudo: String(linha[8] || '').trim(),
+    numTIS: String(linha[9] || '').trim(),
+    termoRecursoUrl: String(linha[10] || '').trim()
+  };
+}
+
+/**
+ * action=listarCandidatos (GET): retorna todos os candidatos de
+ * "candidatosDataBase" (com o nome de "candidatos" anexado), no
+ * formato usado pela tela CRUD — o equivalente em dados à tabela
+ * "principal" da aba Principal.
+ */
+function apiListarCandidatos() {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID_API);
+  var abaDataBase = ss.getSheetByName('candidatosDataBase');
+  var abaCandidatos = ss.getSheetByName('candidatos');
+  if (!abaDataBase) throw new Error('Aba "candidatosDataBase" não encontrada.');
+  if (!abaCandidatos) throw new Error('Aba "candidatos" não encontrada.');
+
+  var mapaNomes = {};
+  lerParesIdNome(abaCandidatos).forEach(function(c) { mapaNomes[c.id] = c.nome; });
+
+  var ultimaLinha = abaDataBase.getLastRow();
+  if (ultimaLinha < 2) return [];
+
+  var candidatos = [];
+  abaDataBase.getRange(2, 1, ultimaLinha - 1, 11).getValues().forEach(function(linha) {
+    var id = String(linha[0]).trim();
+    if (!id) return;
+    candidatos.push(linhaCandidatoParaApi(id, mapaNomes[id] || '', linha));
+  });
+
+  return candidatos;
+}
+
+/**
+ * action=atualizarCandidato (POST): { id, status?, observacoes?,
+ * numTIS? } — cada campo presente no corpo é atualizado; campos
+ * ausentes (undefined) não são tocados. Segue exatamente a mesma
+ * lógica de status/finalizado/dataLaudo/Laudo de
+ * processarEdicaoStatusPrincipal(), mas sem diálogos de confirmação
+ * (a confirmação de INAPTO e a oferta de gerar o Termo de Recurso
+ * ficam por conta do front-end, chamando action=gerarTermoRecurso à
+ * parte quando o usuário confirmar). Retorna o candidato atualizado.
+ */
+function apiAtualizarCandidato(corpo) {
+  var id = String((corpo && corpo.id) || '').trim();
+  if (!id) throw new Error('"id" é obrigatório.');
+
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID_API);
+  var abaDataBase = ss.getSheetByName('candidatosDataBase');
+  var abaCandidatos = ss.getSheetByName('candidatos');
+  if (!abaDataBase) throw new Error('Aba "candidatosDataBase" não encontrada.');
+  if (!abaCandidatos) throw new Error('Aba "candidatos" não encontrada.');
+
+  var linhaDataBase = localizarLinhaCandidatosDataBasePorId(abaDataBase, id);
+  if (linhaDataBase === -1) throw new Error('Candidato com matrícula "' + id + '" não encontrado.');
+
+  if (corpo.observacoes !== undefined) {
+    abaDataBase.getRange(linhaDataBase, 5).setValue(corpo.observacoes || '');
+  }
+
+  if (corpo.numTIS !== undefined) {
+    abaDataBase.getRange(linhaDataBase, 10).setValue(corpo.numTIS || '');
+  }
+
+  if (corpo.status !== undefined) {
+    var novoValor = String(corpo.status || '').trim().toUpperCase();
+
+    if (!novoValor) {
+      abaDataBase.getRange(linhaDataBase, 4).setValue('');
+      abaDataBase.getRange(linhaDataBase, 6).setValue(false);
+      abaDataBase.getRange(linhaDataBase, 8).setValue('');
+      abaDataBase.getRange(linhaDataBase, 9).setValue('');
+    } else if (novoValor === 'PENDENTE') {
+      abaDataBase.getRange(linhaDataBase, 4).setValue('Pendente');
+      abaDataBase.getRange(linhaDataBase, 6).setValue(false);
+      abaDataBase.getRange(linhaDataBase, 8).setValue('');
+      abaDataBase.getRange(linhaDataBase, 9).setValue('');
+    } else {
+      var laudoTexto = MAPA_LAUDO_POR_STATUS[novoValor];
+      if (!laudoTexto) throw new Error('Status inválido: "' + corpo.status + '".');
+
+      var hoje = new Date();
+      hoje.setHours(12, 0, 0, 0);
+
+      abaDataBase.getRange(linhaDataBase, 4).setValue(novoValor);
+      abaDataBase.getRange(linhaDataBase, 6).setValue(true);
+      abaDataBase.getRange(linhaDataBase, 8).setValue(hoje);
+      abaDataBase.getRange(linhaDataBase, 9).setValue(laudoTexto);
+    }
+  }
+
+  var mapaNomes = {};
+  lerParesIdNome(abaCandidatos).forEach(function(c) { mapaNomes[c.id] = c.nome; });
+  var linhaAtualizada = abaDataBase.getRange(linhaDataBase, 1, 1, 11).getValues()[0];
+  return linhaCandidatoParaApi(id, mapaNomes[id] || '', linhaAtualizada);
+}
+
+/**
+ * action=criarCandidato (POST): { id, nome } — cadastra um novo
+ * candidato em "candidatos" (reordenando alfabeticamente) e
+ * "candidatosDataBase", reaproveitando gravarExaminee()/
+ * gravarExamineeDataBase() (mesma lógica usada no processamento da
+ * mensagem inicial). Não grava nada na aba "Principal" — a tela CRUD
+ * do app externo substitui a Principal como front-end; quem continua
+ * sendo a fonte de verdade é "candidatosDataBase"/"candidatos".
+ */
+function apiCriarCandidato(corpo) {
+  var id = String((corpo && corpo.id) || '').trim();
+  var nome = String((corpo && corpo.nome) || '').trim();
+  if (!id) throw new Error('"id" é obrigatório.');
+  if (!nome) throw new Error('"nome" é obrigatório.');
+
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID_API);
+  var abaCandidatos = ss.getSheetByName('candidatos');
+  var abaDataBase = ss.getSheetByName('candidatosDataBase');
+  if (!abaCandidatos) throw new Error('Aba "candidatos" não encontrada.');
+  if (!abaDataBase) throw new Error('Aba "candidatosDataBase" não encontrada.');
+
+  var existentes = lerParesIdNome(abaCandidatos);
+  if (existentes.some(function(c) { return c.id === id; })) {
+    throw new Error('Já existe um candidato com a matrícula "' + id + '".');
+  }
+
+  var resultadoExaminee = gravarExaminee(ss, [{ id: id, nome: nome }]);
+  gravarExamineeDataBase(ss, resultadoExaminee.listaOrdenada);
+
+  var linhaDataBase = localizarLinhaCandidatosDataBasePorId(abaDataBase, id);
+  var linha = abaDataBase.getRange(linhaDataBase, 1, 1, 11).getValues()[0];
+  return linhaCandidatoParaApi(id, nome, linha);
+}
+
+/**
+ * action=gerarTermoRecurso (POST): { id } — gera (ou reaproveita) o
+ * Termo de Cientificação de Recurso do candidato, via
+ * gerarPdfTermoRecurso(). Chamada pelo front-end somente depois que o
+ * usuário confirmar (no navegador) o mesmo fluxo de duas perguntas do
+ * Sheets: "Registrar como inapto?" seguido de "Gerar o Termo?".
+ */
+function apiGerarTermoRecurso(corpo) {
+  var id = String((corpo && corpo.id) || '').trim();
+  if (!id) throw new Error('"id" é obrigatório.');
+
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID_API);
+  return gerarPdfTermoRecurso(ss, id);
 }
