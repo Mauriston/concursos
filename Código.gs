@@ -68,6 +68,17 @@ function aplicarPontuacao(lista, isEcho) {
 function abrirModal() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
+  var pendentes = listarCandidatosNaoFinalizados(ss);
+  if (pendentes.length > 0) {
+    var listaPendentes = pendentes.map(function(c) { return '- ' + c.id + '  ' + c.nome; }).join('\n');
+    SpreadsheetApp.getUi().alert(
+      'Candidatos não finalizados',
+      'Não é possível gerar a minuta: há ' + pendentes.length + ' candidato(s) com a IS ainda não finalizada em "candidatosDataBase":\n\n' + listaPendentes,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+
   var dadosMsgInicial = obterDadosMensagemInicial(ss);
   var dataHoraInicial = dadosMsgInicial ? dadosMsgInicial.dataHora : 'R-000000Z/MMM/AAAA';
   var nomeConcurso = dadosMsgInicial ? extrairNomeConcurso(dadosMsgInicial.subject) : 'NÃO INFORMADO';
@@ -636,6 +647,35 @@ function obterCandidatosPorStatus(ss) {
   });
 
   return resultado;
+}
+
+/**
+ * Lista os candidatos de "candidatosDataBase" cuja coluna "finalizado"
+ * ainda não está marcada (caixa de seleção desmarcada), com o nome
+ * anexado de "candidatos". Usada para bloquear a geração da minuta de
+ * resultados da IS enquanto houver candidato pendente.
+ */
+function listarCandidatosNaoFinalizados(ss) {
+  var abaDataBase = ss.getSheetByName('candidatosDataBase');
+  var abaCandidatos = ss.getSheetByName('candidatos');
+  if (!abaDataBase) throw new Error('Aba "candidatosDataBase" não encontrada.');
+  if (!abaCandidatos) throw new Error('Aba "candidatos" não encontrada.');
+
+  var mapaNomes = {};
+  lerParesIdNome(abaCandidatos).forEach(function(c) { mapaNomes[c.id] = c.nome; });
+
+  var pendentes = [];
+  var ultimaLinha = abaDataBase.getLastRow();
+  if (ultimaLinha < 2) return pendentes;
+
+  abaDataBase.getRange(2, 1, ultimaLinha - 1, 5).getValues().forEach(function(linha) {
+    var id = String(linha[0]).trim();
+    if (!id) return;
+    var finalizado = linha[4] === true;
+    if (!finalizado) pendentes.push({ id: id, nome: mapaNomes[id] || '' });
+  });
+
+  return pendentes;
 }
 
 /**
