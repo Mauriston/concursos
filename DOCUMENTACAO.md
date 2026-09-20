@@ -124,8 +124,8 @@ alternado (branco/cinza-claro) e bordas de destaque na primeira e
 
 ### 2.6 `Listas por Conclusões` (legado)
 Aba usada pelo fluxo antigo, anterior à tabela `principal` dinâmica e a
-`candidatosDataBase`. Ainda é referenciada por `processarGeracaoRecursos`
-(ver §6 — Itens legados).
+`candidatosDataBase`. Não é mais referenciada por nenhuma função do
+script (ver §6 — Itens legados/removidos).
 
 ---
 
@@ -138,7 +138,7 @@ Aba usada pelo fluxo antigo, anterior à tabela `principal` dinâmica e a
 | `UploadMensagem.html` | Modal de upload do PDF da mensagem administrativa |
 | `AgendamentoIS.html` | Modal de configuração e confirmação do agendamento das IS |
 | `Modal.html` | Modal genérico de exibição de minuta (usado tanto para a minuta de agendamento quanto para a minuta de resultados), com botão "Copiar Minuta" |
-| `Alerta.html` | Modal genérico de alerta/confirmação (usado em vários fluxos: confirmação inicial, geração de recursos em lote, alerta final) |
+| `Alerta.html` | Modal genérico de alerta/confirmação (usado em vários fluxos: confirmação inicial, mensagens de aviso/erro, alerta final) |
 
 ---
 
@@ -296,13 +296,12 @@ Mapa Status → Laudo (`MAPA_LAUDO_POR_STATUS`):
 4. Mostra um alerta com o link do termo gerado.
 
 ### 4.5 Mensagem final de resultados da IS
-Menu **✏️ Termos → 🛑 Cientificação de Recurso** aciona
-`iniciarGeracaoRecursos()`, que pergunta se deseja "verificar os
-candidatos com interposição de recurso e gerar os Termos individuais" —
-**este é o fluxo legado em lote**, ver §6. A minuta de resultados
-propriamente dita é gerada por `abrirModal()`, chamada a partir do
-alerta inicial de confirmação de dados (`iniciarProcesso()` → "Sim,
-gerar minuta").
+Menu **✏️ Termos → ✅ Gerar Minuta de Resultados da IS** aciona
+`iniciarProcesso()`, que exibe o alerta de confirmação "Os dados de
+Status de cada candidato (aba 'Principal' / candidatosDataBase) foram
+devidamente checados com os dados do SINAIS (candidato a candidato)
+pelo Supervisor?". Ao confirmar ("Sim, gerar minuta"), chama
+`abrirModal()`.
 
 `abrirModal()`:
 
@@ -347,7 +346,7 @@ ECHO - Candidatos que interpuseram recurso... (total: N): BT
 | Edição de célula | **instalável** (`aoEditarPrincipalInstalavel`, precisa ser ativado 1x pelo menu) | tabela `principal` (aba Principal), colunas Status/Observações/Nº TIS | Sincroniza com `candidatosDataBase`, dispara confirmações e o Termo de Recurso individual |
 
 ### Itens de menu (✏️ Termos)
-- 🛑 Cientificação de Recurso → geração de Termos em lote (legado, §6)
+- ✅ Gerar Minuta de Resultados da IS → fluxo de conclusão/minuta final (§4.5)
 - 📄 Registrar Mensagem (PDF) → início do fluxo (§4.1)
 - ⚙️ Ativar automação da tabela Principal → instala o gatilho de
   sincronização (uma vez só, §4.3)
@@ -362,26 +361,27 @@ ECHO - Candidatos que interpuseram recurso... (total: N): BT
   `principal` (que tem cabeçalho e colunas localizados
   dinamicamente); pode não corresponder mais ao layout atual da
   planilha. Vale revisar/remover se não estiver mais em uso.
-- **`processarGeracaoRecursos()`** (geração de Termos de Recurso **em
-  lote**, acionada pelo menu "🛑 Cientificação de Recurso"): lê a aba
-  "Principal" em posições fixas (`A12:K`, coluna A = Data, D =
-  Candidato, **G = Recurso** com valor literal "Sim", J = Data Laudo).
-  A tabela `principal` atual **não tem** uma coluna "Recurso" nessa
-  posição (o layout real é `Data, dataAgendamento, Matricula,
-  Candidato, Status, Observações, Nº TIS, Data laudo`) — esse fluxo em
-  lote está desalinhado com a estrutura atual e provavelmente não
-  encontra candidatos para gerar. O fluxo válido e testado atualmente
-  é o **individual**, disparado ao selecionar Status = INAPTO na
-  Principal (§4.4, `gerarTermoRecursoIndividual`). Recomenda-se decidir
-  entre atualizar `processarGeracaoRecursos()` para a estrutura atual
-  ou removê-lo do menu.
-- **Aba "Listas por Conclusões"**: usada apenas por
-  `processarGeracaoRecursos()` (legado acima). A minuta de resultados
-  (§4.5) não depende mais dela desde a migração para
-  `candidatosDataBase`/`candidatos`.
 - **Coluna `reagendamento`** de `candidatosDataBase`: existe na
   estrutura mas não é lida nem escrita por nenhuma função atual do
   script (uso manual).
+
+### Removidos
+- **Geração de Termos de Recurso em lote** (`iniciarGeracaoRecursos()`
+  / `processarGeracaoRecursos()`, antigo item de menu "🛑
+  Cientificação de Recurso"): lia a aba "Principal" em posições fixas
+  (`A12:K`, coluna G = "Recurso" com valor literal "Sim", J = Data
+  Laudo) que não correspondem mais à tabela `principal` atual (layout
+  real: `Data, dataAgendamento, Matricula, Candidato, Status,
+  Observações, Nº TIS, Data laudo`, sem coluna "Recurso"). Removido do
+  script e do menu — o fluxo válido e único hoje é o **individual**,
+  disparado ao selecionar Status = INAPTO na Principal (§4.4,
+  `gerarTermoRecursoIndividual`). O ramo `recurso_confirmacao` e a
+  função `avancarRecursos()` também foram removidos de `Alerta.html`
+  por ficarem órfãos.
+- **Aba "Listas por Conclusões"**: só era usada pelo fluxo em lote
+  removido acima. Não é mais referenciada por nenhuma função do
+  script — a minuta de resultados (§4.5) já usava
+  `candidatosDataBase`/`candidatos` desde a migração anterior.
 
 ---
 

@@ -4,7 +4,7 @@
 function onOpen() {
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('✏️ Termos')
-    .addItem('🛑 Cientificação de Recurso', 'iniciarGeracaoRecursos')
+    .addItem('✅ Gerar Minuta de Resultados da IS', 'iniciarProcesso')
     .addSeparator()
     .addItem('📄 Registrar Mensagem (PDF)', 'iniciarUploadMensagem')
     .addSeparator()
@@ -38,7 +38,7 @@ function onEdit(e) {
 function iniciarProcesso() {
   var htmlTemplate = HtmlService.createTemplateFromFile('Alerta');
   htmlTemplate.titulo = 'Confirmação de Dados';
-  htmlTemplate.mensagem = "Os dados da aba 'Listas por Conclusões' foram devidamente checados com os dados do SINAIS (candidato a candidato) pelo Supervisor?";
+  htmlTemplate.mensagem = "Os dados de Status de cada candidato (aba 'Principal' / candidatosDataBase) foram devidamente checados com os dados do SINAIS (candidato a candidato) pelo Supervisor?";
   htmlTemplate.tipo = 'confirmacao';
   
   var htmlOutput = htmlTemplate.evaluate()
@@ -192,117 +192,6 @@ function formatarDataSimples(dataOrig) {
   var mes = String(d.getMonth() + 1).padStart(2, '0');
   var ano = d.getFullYear();
   return dia + "/" + mes + "/" + ano;
-}
-
-
-// =========================================================================
-// NOVA FUNCIONALIDADE: TERMOS DE RECONHECIMENTO DE RECURSO (ARQUIVOS INDIVIDUAIS)
-// =========================================================================
-
-/**
- * 1. Exibe o modal perguntando se deseja avançar.
- */
-function iniciarGeracaoRecursos() {
-  var htmlTemplate = HtmlService.createTemplateFromFile('Alerta');
-  htmlTemplate.titulo = 'Gerar Termos de Recurso';
-  htmlTemplate.mensagem = 'Deseja verificar os candidatos com interposição de recurso e gerar os Termos individuais?<br><br>Ficheiros já existentes na pasta não serão duplicados.';
-  htmlTemplate.tipo = 'recurso_confirmacao';
-  
-  var htmlOutput = htmlTemplate.evaluate().setWidth(500).setHeight(400).setTitle('Inspeção de Saúde');
-  SpreadsheetApp.getUi().showModalDialog(htmlOutput, ' ');
-}
-
-/**
- * 2. Processa os recursos na aba Principal, verifica duplicações e gera os PDFs.
- */
-function processarGeracaoRecursos() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  try {
-    var abaPrincipal = ss.getSheetByName('Principal');
-    
-    // Extrai e formata o nome do concurso
-    var nomeConcursoBruto = abaPrincipal.getRange('F3').getValue() || "NÃO INFORMADO";
-    var nomeConcurso = String(nomeConcursoBruto).replace(/CONCURSO\s+/i, '');
-
-    // Cria Pasta TERMOS deste concurso
-    var idPastaPai = '1_dJV8HP1WFXa5lSV-p0V0N22_YXWIRDa';
-    var subPasta = DriveApp.getFolderById(idPastaPai);
-
-    // Leitura dos dados da aba Principal (A12:K)
-    // A=0(Data), D=3(Candidato), G=6(Recurso), J=9(Data Laudo)
-    var ultimaLinha = abaPrincipal.getLastRow();
-    if (ultimaLinha < 12) {
-      mostrarAlertaGenerico("Aviso", "Não há dados de candidatos na aba Principal.");
-      return;
-    }
-    
-    var dados = abaPrincipal.getRange('A12:K' + ultimaLinha).getValues();
-    
-    var idTemplate = '1CpgsInQSHnx_ji6NBfAiKmRmbfczKYW-M0QO4LZllgc';
-    var dataHojeFormatada = formatarDataSimples(new Date());
-    
-    var quantidadeGerados = 0;
-    var quantidadeIgnorados = 0;
-
-    for (var i = 0; i < dados.length; i++) {
-      var linha = dados[i];
-      var temRecurso = String(linha[6]).trim(); // Coluna G
-      
-      if (temRecurso.toLowerCase() === 'sim') {
-        var candidato = String(linha[3]).trim(); // Coluna D
-        var dataLaudo = formatarDataSimples(linha[9]); // Coluna J
-        
-        var nomeArquivoPdf = "Termo Recurso " + candidato + ".pdf";
-        
-        // VERIFICAÇÃO DE DUPLICIDADE: Checa se já existe arquivo com este nome na subpasta
-        var arquivosExistentes = subPasta.getFilesByName(nomeArquivoPdf);
-        if (arquivosExistentes.hasNext()) {
-          quantidadeIgnorados++;
-          continue; // Já existe, ignora e vai para o próximo
-        }
-
-        // Se não existir, faz a cópia e preenche os dados
-        var docCopia = DriveApp.getFileById(idTemplate).makeCopy("Temp_Recurso_" + candidato);
-        var docAberto = DocumentApp.openById(docCopia.getId());
-        var body = docAberto.getBody();
-        
-        body.replaceText("\\{\\{Candidato\\}\\}", candidato);
-        body.replaceText("\\{\\{Data Laudo\\}\\}", dataLaudo);
-        body.replaceText("\\{\\{DATA_HOJE\\}\\}", dataHojeFormatada);
-        
-        docAberto.saveAndClose();
-        
-        // Converte para PDF e grava na subpasta
-        var pdfBlob = docCopia.getAs("application/pdf");
-        pdfBlob.setName(nomeArquivoPdf);
-        subPasta.createFile(pdfBlob);
-        
-        // Remove o arquivo temporário (Google Doc)
-        docCopia.setTrashed(true);
-        
-        quantidadeGerados++;
-      }
-    }
-
-    var linkSubpasta = subPasta.getUrl();
-    var mensagemSucesso = '';
-
-    if (quantidadeGerados === 0 && quantidadeIgnorados === 0) {
-      mensagemSucesso = "Nenhum candidato com <b>Recurso='Sim'</b> foi encontrado na aba Principal.";
-    } else {
-      mensagemSucesso = 'Verificação e Processamento Concluídos!<br><br>' +
-                        '<b>Novos termos gerados:</b> ' + quantidadeGerados + '<br>' +
-                        '<b>Termos já existentes (ignorados):</b> ' + quantidadeIgnorados + '<br><br>' +
-                        '<b>Pasta de Destino:</b> <a href="' + linkSubpasta + '" target="_blank">' + nomeConcurso + '</a><br><br>' +
-                        '<i>Clique no link acima para abrir a pasta com os ficheiros.</i>';
-    }
-
-    mostrarAlertaGenerico("Processo de Recursos Concluído", mensagemSucesso);
-
-  } catch (erro) {
-    mostrarAlertaGenerico("Erro", "Ocorreu um erro ao processar os recursos: <br><br>" + erro.message);
-  }
 }
 
 
@@ -1841,10 +1730,10 @@ function processarEdicaoStatusPrincipal(aba, estrutura, linha, e) {
 /**
  * Gera o Termo de Cientificação de Recurso para um único candidato
  * (identificado por "id"), buscando os dados em "candidatos" e
- * "candidatosDataBase". Segue o mesmo template/pasta usados em
- * processarGeracaoRecursos(), mas reaproveita um arquivo já existente em
- * vez de duplicá-lo. Ao final, marca a caixa de seleção "recurso" como
- * VERDADEIRO e grava a URL do PDF em "termoRecursoUrl" (candidatosDataBase).
+ * "candidatosDataBase". Reaproveita um arquivo já existente na pasta
+ * de Termos em vez de duplicá-lo. Ao final, marca a caixa de seleção
+ * "recurso" como VERDADEIRO e grava a URL do PDF em "termoRecursoUrl"
+ * (candidatosDataBase).
  */
 function gerarTermoRecursoIndividual(id) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
