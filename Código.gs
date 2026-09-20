@@ -593,10 +593,12 @@ function lerParesIdNome(aba) {
 /**
  * Agrupa todos os candidatos de "candidatosDataBase" (com o nome anexado
  * de "candidatos") pelo valor da coluna "status" (APTO/INAPTO/FALTOU/
- * INSUF DOCUMENTAL), no formato "- {id}  {nome}" usado na minuta de
+ * INSUF DOCUMENTAL — candidatos com "Pendente" ou vazio não entram em
+ * nenhum grupo), no formato "- {id}  {nome}" usado na minuta de
  * resultados da IS. Também monta a lista de candidatos com recurso
- * ("recurso" = "Sim"), no formato "- Em {dataLaudo}: {id}  {nome}", e
- * retorna o total de candidatos cadastrados (independente do status).
+ * (coluna "recurso", caixa de seleção VERDADEIRO/FALSO), no formato
+ * "- Em {dataLaudo}: {id}  {nome}", e retorna o total de candidatos
+ * cadastrados (independente do status).
  */
 function obterCandidatosPorStatus(ss) {
   var abaDataBase = ss.getSheetByName('candidatosDataBase');
@@ -619,7 +621,7 @@ function obterCandidatosPorStatus(ss) {
 
     var nome = mapaNomes[id] || '';
     var status = String(linha[3]).trim().toUpperCase();
-    var recurso = String(linha[5]).trim();
+    var recurso = linha[5] === true;
     var dataLaudo = linha[6];
     var item = '- ' + id + '  ' + nome;
 
@@ -628,7 +630,7 @@ function obterCandidatosPorStatus(ss) {
     else if (status === 'FALTOU') resultado.faltosos.push(item);
     else if (status === 'INSUF DOCUMENTAL') resultado.idm.push(item);
 
-    if (recurso.toLowerCase() === 'sim') {
+    if (recurso) {
       resultado.recursos.push('- Em ' + formatarDataMilitar(dataLaudo) + ': ' + id + '  ' + nome);
     }
   });
@@ -1690,8 +1692,11 @@ function sincronizarNumTISPrincipal(aba, estrutura, linha, novoValor) {
 
 /**
  * Processa a edição da coluna "Status" da tabela "principal":
- * - Se a célula for limpa, limpa também "status", "finalizado", "dataLaudo"
- *   e "Laudo" em "candidatosDataBase", e "Data laudo" em "Principal".
+ * - Se a célula for limpa, limpa também "finalizado", "dataLaudo" e
+ *   "Laudo" em "candidatosDataBase", e "Data laudo" em "Principal".
+ * - Se o status "Pendente" for selecionado, grava "status" = "Pendente"
+ *   em "candidatosDataBase", sem marcar "finalizado" nem gravar "Laudo"
+ *   ou "dataLaudo" (ficam limpos, igual ao caso de célula vazia).
  * - Se um status válido (APTO/INAPTO/FALTOU/INSUF DOCUMENTAL) for
  *   selecionado, grava "status"/"finalizado"/"dataLaudo"/"Laudo" em
  *   "candidatosDataBase" e a "Data laudo" de hoje em "Principal".
@@ -1717,6 +1722,15 @@ function processarEdicaoStatusPrincipal(aba, estrutura, linha, e) {
 
   if (!novoValor) {
     abaDataBase.getRange(linhaDataBase, 4).setValue('');
+    abaDataBase.getRange(linhaDataBase, 5).setValue(false);
+    abaDataBase.getRange(linhaDataBase, 7).setValue('');
+    abaDataBase.getRange(linhaDataBase, 8).setValue('');
+    if (estrutura.colDataLaudo !== -1) aba.getRange(linha, estrutura.colDataLaudo).setValue('');
+    return;
+  }
+
+  if (novoValor === 'PENDENTE') {
+    abaDataBase.getRange(linhaDataBase, 4).setValue('Pendente');
     abaDataBase.getRange(linhaDataBase, 5).setValue(false);
     abaDataBase.getRange(linhaDataBase, 7).setValue('');
     abaDataBase.getRange(linhaDataBase, 8).setValue('');
@@ -1767,8 +1781,8 @@ function processarEdicaoStatusPrincipal(aba, estrutura, linha, e) {
  * (identificado por "id"), buscando os dados em "candidatos" e
  * "candidatosDataBase". Segue o mesmo template/pasta usados em
  * processarGeracaoRecursos(), mas reaproveita um arquivo já existente em
- * vez de duplicá-lo. Ao final, marca "recurso" = "Sim" e grava a URL do
- * PDF em "termoRecursoUrl" (candidatosDataBase).
+ * vez de duplicá-lo. Ao final, marca a caixa de seleção "recurso" como
+ * VERDADEIRO e grava a URL do PDF em "termoRecursoUrl" (candidatosDataBase).
  */
 function gerarTermoRecursoIndividual(id) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1824,7 +1838,7 @@ function gerarTermoRecursoIndividual(id) {
     docCopia.setTrashed(true);
   }
 
-  abaDataBase.getRange(linhaDataBase, 6).setValue('Sim');
+  abaDataBase.getRange(linhaDataBase, 6).setValue(true);
   abaDataBase.getRange(linhaDataBase, 10).setValue(arquivoPdf.getUrl());
 
   mostrarAlertaGenerico(
