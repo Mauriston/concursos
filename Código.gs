@@ -592,13 +592,13 @@ function lerParesIdNome(aba) {
 
 /**
  * Agrupa todos os candidatos de "candidatosDataBase" (com o nome anexado
- * de "candidatos") em APTO/INAPTO/FALTOU/INSUF DOCUMENTAL, no formato
- * "- {id}  {nome}" usado na minuta de resultados da IS. A categoria é
- * obtida a partir do texto gravado em "Laudo" (via MAPA_STATUS_POR_LAUDO),
- * não da coluna "status" — essa é uma caixa de seleção (VERDADEIRO/FALSO)
- * e não guarda esse texto. Também monta a lista de candidatos com recurso
- * ("recurso" = "Sim"), no formato "- Em {dataLaudo}: {id}  {nome}", e
- * retorna o total de candidatos cadastrados (independente do status).
+ * de "candidatos") pelo valor da coluna "status" (APTO/INAPTO/FALTOU/
+ * INSUF DOCUMENTAL — candidatos com "Pendente" ou vazio não entram em
+ * nenhum grupo), no formato "- {id}  {nome}" usado na minuta de
+ * resultados da IS. Também monta a lista de candidatos com recurso
+ * (coluna "recurso", caixa de seleção VERDADEIRO/FALSO), no formato
+ * "- Em {dataLaudo}: {id}  {nome}", e retorna o total de candidatos
+ * cadastrados (independente do status).
  */
 function obterCandidatosPorStatus(ss) {
   var abaDataBase = ss.getSheetByName('candidatosDataBase');
@@ -620,9 +620,8 @@ function obterCandidatosPorStatus(ss) {
     resultado.total++;
 
     var nome = mapaNomes[id] || '';
-    var laudo = String(linha[7]).trim();
-    var status = MAPA_STATUS_POR_LAUDO[laudo] || '';
-    var recurso = String(linha[5]).trim();
+    var status = String(linha[3]).trim().toUpperCase();
+    var recurso = linha[5] === true;
     var dataLaudo = linha[6];
     var item = '- ' + id + '  ' + nome;
 
@@ -631,7 +630,7 @@ function obterCandidatosPorStatus(ss) {
     else if (status === 'FALTOU') resultado.faltosos.push(item);
     else if (status === 'INSUF DOCUMENTAL') resultado.idm.push(item);
 
-    if (recurso.toLowerCase() === 'sim') {
+    if (recurso) {
       resultado.recursos.push('- Em ' + formatarDataMilitar(dataLaudo) + ': ' + id + '  ' + nome);
     }
   });
@@ -1602,22 +1601,6 @@ var MAPA_LAUDO_POR_STATUS = {
 };
 
 /**
- * Mapa inverso de MAPA_LAUDO_POR_STATUS: do texto gravado em "Laudo"
- * (candidatosDataBase, coluna H) de volta para a opção correspondente da
- * coluna "Status" da tabela "principal". Usado para categorizar os
- * candidatos na minuta de resultados, já que a coluna "status" de
- * "candidatosDataBase" é uma caixa de seleção (VERDADEIRO/FALSO) e não
- * pode armazenar o texto do status — "Laudo" é a única fonte confiável
- * dessa categoria.
- */
-var MAPA_STATUS_POR_LAUDO = {
-  'Apto para Ingresso': 'APTO',
-  'Inapto para Ingresso': 'INAPTO',
-  'IS não concluída por não comparecimento': 'FALTOU',
-  'IS não concluída por Insuficiência Documental Médica': 'INSUF DOCUMENTAL'
-};
-
-/**
  * Cria (se ainda não existir) o gatilho onEdit INSTALÁVEL responsável pela
  * sincronização Status/Nº TIS da tabela "principal" com "candidatosDataBase".
  * Precisa ser instalável (não simples) porque exibe alertas (SpreadsheetApp.getUi()),
@@ -1711,12 +1694,12 @@ function sincronizarNumTISPrincipal(aba, estrutura, linha, novoValor) {
  * Processa a edição da coluna "Status" da tabela "principal":
  * - Se a célula for limpa, limpa também "finalizado", "dataLaudo" e
  *   "Laudo" em "candidatosDataBase", e "Data laudo" em "Principal".
+ * - Se o status "Pendente" for selecionado, grava "status" = "Pendente"
+ *   em "candidatosDataBase", sem marcar "finalizado" nem gravar "Laudo"
+ *   ou "dataLaudo" (ficam limpos, igual ao caso de célula vazia).
  * - Se um status válido (APTO/INAPTO/FALTOU/INSUF DOCUMENTAL) for
- *   selecionado, grava "finalizado"/"dataLaudo"/"Laudo" em
- *   "candidatosDataBase" e a "Data laudo" de hoje em "Principal". A
- *   coluna "status" de candidatosDataBase é uma caixa de seleção
- *   (VERDADEIRO/FALSO) e não é usada para guardar essa categoria — quem
- *   guarda o texto do status é "Laudo" (ver MAPA_STATUS_POR_LAUDO).
+ *   selecionado, grava "status"/"finalizado"/"dataLaudo"/"Laudo" em
+ *   "candidatosDataBase" e a "Data laudo" de hoje em "Principal".
  * - Para INAPTO, confirma com o usuário antes de gravar (revertendo a
  *   célula ao valor anterior se recusado) e, em seguida, oferece gerar o
  *   Termo de Cientificação de Recurso.
@@ -1738,6 +1721,16 @@ function processarEdicaoStatusPrincipal(aba, estrutura, linha, e) {
   var novoValor = String(e.value || '').trim().toUpperCase();
 
   if (!novoValor) {
+    abaDataBase.getRange(linhaDataBase, 4).setValue('');
+    abaDataBase.getRange(linhaDataBase, 5).setValue(false);
+    abaDataBase.getRange(linhaDataBase, 7).setValue('');
+    abaDataBase.getRange(linhaDataBase, 8).setValue('');
+    if (estrutura.colDataLaudo !== -1) aba.getRange(linha, estrutura.colDataLaudo).setValue('');
+    return;
+  }
+
+  if (novoValor === 'PENDENTE') {
+    abaDataBase.getRange(linhaDataBase, 4).setValue('Pendente');
     abaDataBase.getRange(linhaDataBase, 5).setValue(false);
     abaDataBase.getRange(linhaDataBase, 7).setValue('');
     abaDataBase.getRange(linhaDataBase, 8).setValue('');
@@ -1765,6 +1758,7 @@ function processarEdicaoStatusPrincipal(aba, estrutura, linha, e) {
     }
   }
 
+  abaDataBase.getRange(linhaDataBase, 4).setValue(novoValor);
   abaDataBase.getRange(linhaDataBase, 5).setValue(true);
   abaDataBase.getRange(linhaDataBase, 7).setValue(hoje);
   abaDataBase.getRange(linhaDataBase, 8).setValue(laudoTexto);
@@ -1787,8 +1781,8 @@ function processarEdicaoStatusPrincipal(aba, estrutura, linha, e) {
  * (identificado por "id"), buscando os dados em "candidatos" e
  * "candidatosDataBase". Segue o mesmo template/pasta usados em
  * processarGeracaoRecursos(), mas reaproveita um arquivo já existente em
- * vez de duplicá-lo. Ao final, marca "recurso" = "Sim" e grava a URL do
- * PDF em "termoRecursoUrl" (candidatosDataBase).
+ * vez de duplicá-lo. Ao final, marca a caixa de seleção "recurso" como
+ * VERDADEIRO e grava a URL do PDF em "termoRecursoUrl" (candidatosDataBase).
  */
 function gerarTermoRecursoIndividual(id) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1844,7 +1838,7 @@ function gerarTermoRecursoIndividual(id) {
     docCopia.setTrashed(true);
   }
 
-  abaDataBase.getRange(linhaDataBase, 6).setValue('Sim');
+  abaDataBase.getRange(linhaDataBase, 6).setValue(true);
   abaDataBase.getRange(linhaDataBase, 10).setValue(arquivoPdf.getUrl());
 
   mostrarAlertaGenerico(
