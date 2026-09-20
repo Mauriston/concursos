@@ -100,10 +100,6 @@
     <? if (tipo === 'confirmacao') { ?>
       <button class="btn btn-secondary" onclick="google.script.host.close()">Não</button>
       <button class="btn btn-primary" id="btn-sim" onclick="avancarMinuta()">Sim, gerar minuta</button>
-      
-    <? } else if (tipo === 'recurso_confirmacao') { ?>
-      <button class="btn btn-secondary" onclick="google.script.host.close()">Não</button>
-      <button class="btn btn-primary" id="btn-sim-recursos" onclick="avancarRecursos()">Sim, processar Recursos</button>
 
     <? } else { ?>
       <button class="btn btn-primary" onclick="google.script.host.close()">OK, Fechar</button>
@@ -116,16 +112,7 @@
       btn.disabled = true;
       btn.innerText = "Processando...";
       btn.style.opacity = "0.7";
-      google.script.run.abrirModal(); 
-    }
-
-    function avancarRecursos() {
-      var btn = document.getElementById('btn-sim-recursos');
-      btn.disabled = true;
-      btn.innerText = "Verificando...";
-      btn.style.opacity = "0.7";
-      document.getElementById('texto-mensagem').innerHTML = "<b>A verificar e a processar os Termos de Recurso...</b><br>Isto pode levar alguns minutos.<br>Por favor, não feche esta janela.";
-      google.script.run.processarGeracaoRecursos();
+      google.script.run.abrirModal();
     }
   </script>
 </body>
