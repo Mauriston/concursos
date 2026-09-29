@@ -155,7 +155,7 @@ como front-end de edição para as colunas Status/Observações/Nº TIS.
 | C | 3 | `reagendamento` | — | **não gerenciada pelo script** (uso manual) |
 | D | 4 | `status` | texto | `APTO` / `INAPTO` / `FALTOU` / `INSUF DOCUMENTAL` / `Pendente` / vazio |
 | E | 5 | `observacoes` | texto | espelho da coluna "Observações" da tabela Principal |
-| F | 6 | `finalizado` | ☑️ booleano | `TRUE` quando um status com laudo (não vazio, não Pendente) é selecionado |
+| F | 6 | `finalizado` | ☑️ booleano | `TRUE` somente quando um status com laudo (APTO/INAPTO/FALTOU/INSUF DOCUMENTAL) está gravado **e** a coluna "Nº TIS" da tabela Principal está preenchida para o candidato (ver `candidatoEstaFinalizado`, §4.3) |
 | G | 7 | `recurso` | ☑️ booleano | `TRUE` quando o Termo de Recurso é gerado |
 | H | 8 | `dataLaudo` | data | data do laudo (hoje, ao meio-dia, no momento em que o Status é definido) |
 | I | 9 | `Laudo` | texto | texto do laudo correspondente ao Status (ver `MAPA_LAUDO_POR_STATUS`, §4.3) |
@@ -518,7 +518,15 @@ o candidato pela `Matricula` (coluna que casa com
 `candidatosDataBase.id`, via `localizarLinhaCandidatosDataBasePorId`):
 
 - **Nº TIS** (`sincronizarNumTISPrincipal`) → grava/limpa
-  `candidatosDataBase.nº TIS` (coluna J / índice 10).
+  `candidatosDataBase.nº TIS` (coluna J / índice 10) **e recalcula
+  `finalizado`** (coluna F): lê o `status` já gravado em
+  `candidatosDataBase` (coluna D) e chama `candidatoEstaFinalizado(status,
+  novoValorTIS)` — se o status for um laudo válido e o Nº TIS que acabou
+  de ser gravado não estiver vazio, marca `finalizado = TRUE`; caso
+  contrário (Nº TIS limpo, ou status ainda sem laudo), desmarca. Ou seja,
+  informar o Nº TIS **depois** de já ter um Status com laudo é o que
+  efetivamente marca a caixa "finalizado"; apagar o Nº TIS depois
+  desmarca de novo.
 - **Observações** (`sincronizarObservacoesPrincipal`) → grava/limpa
   `candidatosDataBase.observacoes` (coluna E / índice 5).
 - **Status** (`processarEdicaoStatusPrincipal`):
@@ -532,10 +540,16 @@ o candidato pela `Matricula` (coluna que casa com
     limpeza dos demais campos que a célula vazia);
   - `APTO` / `INAPTO` / `FALTOU` / `INSUF DOCUMENTAL` (deve existir
     em `MAPA_LAUDO_POR_STATUS`, senão a edição é ignorada
-    silenciosamente) → grava `status`, marca `finalizado = TRUE`,
-    grava `dataLaudo` = hoje (às 12:00, para evitar problema de fuso)
-    e `Laudo` conforme o mapa abaixo, e replica a data em "Data laudo"
-    na Principal;
+    silenciosamente) → grava `status`, grava `dataLaudo` = hoje (às
+    12:00, para evitar problema de fuso) e `Laudo` conforme o mapa
+    abaixo, e replica a data em "Data laudo" na Principal. **`finalizado`
+    só é marcado `TRUE` nesse momento se a coluna "Nº TIS" da Principal
+    já estiver preenchida** para aquele candidato
+    (`candidatoEstaFinalizado(novoValor, numTisAtual)`, lendo o valor
+    atual da célula "Nº TIS" via `estrutura.colNumTIS`); se o Nº TIS
+    ainda não foi informado, `finalizado` permanece/fica `FALSE` mesmo
+    com o Status já definido, até que o Nº TIS seja preenchido (o que
+    aciona o recálculo descrito acima em `sincronizarNumTISPrincipal`);
   - **especificamente para `INAPTO`**: antes de gravar, pergunta *"Registrar
     {Candidato} como inapto hoje ({data})?"* (Sim/Não, via
     `ui.alert(...)`). Se "Não", a célula volta ao valor anterior
@@ -543,7 +557,9 @@ o candidato pela `Matricula` (coluna que casa com
     "Sim", grava normalmente (como no item acima) e, em seguida,
     pergunta *"Gerar o termo de Cientificação de Recurso para
     {Candidato}?"*; se "Sim", chama
-    `gerarTermoRecursoIndividual(id)` (§4.4).
+    `gerarTermoRecursoIndividual(id)` (§4.4). A geração do Termo **não**
+    depende do Nº TIS estar preenchido — apenas a marcação de
+    `finalizado`.
 
 Mapa Status → Laudo (`MAPA_LAUDO_POR_STATUS`):
 
@@ -553,6 +569,17 @@ Mapa Status → Laudo (`MAPA_LAUDO_POR_STATUS`):
 | `INAPTO` | Inapto para Ingresso |
 | `FALTOU` | IS não concluída por não comparecimento |
 | `INSUF DOCUMENTAL` | IS não concluída por Insuficiência Documental Médica |
+
+**Regra de `finalizado`** (`candidatoEstaFinalizado(statusValor,
+numTisValor)`): retorna `TRUE` apenas quando `statusValor` (maiúsculo,
+aparado) existe em `MAPA_LAUDO_POR_STATUS` **e** `numTisValor` (aparado)
+não é vazio. É a única função que decide o valor de `finalizado`, chamada
+tanto pela sincronização de Status quanto pela de Nº TIS, para que o
+resultado seja o mesmo qualquer que seja a ordem em que o usuário
+preencha as duas colunas na Principal. Como a minuta de resultados
+(§4.5) exige que todo candidato esteja `finalizado` antes de gerar,
+isso implica, na prática, que **o Nº TIS de cada candidato precisa
+estar preenchido** antes que a minuta de resultados possa ser gerada.
 
 ### 4.4 Termo de Cientificação de Recurso — individual (PDF)
 `gerarTermoRecursoIndividual(id)` (disparado apenas pelo fluxo INAPTO
@@ -606,7 +633,10 @@ Supervisor?"*. Ao confirmar ("Sim, gerar minuta"), chama
    verifica se todo candidato em `candidatosDataBase` tem `finalizado
    = TRUE`. Se houver algum pendente, mostra um alerta listando
    `- {id}  {nome}` de quem falta finalizar e **interrompe a função**
-   — a minuta só é gerada com todos finalizados.
+   — a minuta só é gerada com todos finalizados. Como `finalizado`
+   exige Status com laudo **e** Nº TIS preenchido (§4.3), este bloqueio
+   também barra a geração da minuta enquanto houver candidato com
+   Status definido mas sem Nº TIS informado na Principal.
 2. Busca a Data-Hora da mensagem inicial em `mensagens`
    (`obterDadosMensagemInicial()`, procura a linha com `proposito =
    "Apresentação e IS"`) e o nome do concurso a partir do Assunto
@@ -729,6 +759,7 @@ gatilho).
 |---|---|
 | `instalarGatilhoOnEditPrincipal()` | (menu) Cria o gatilho instalável `aoEditarPrincipalInstalavel`, se ainda não existir |
 | `aoEditarPrincipalInstalavel(e)` | Gatilho instalável — roteia a edição para o sincronizador certo |
+| `candidatoEstaFinalizado(statusValor, numTisValor)` | Única regra que decide `finalizado`: `TRUE` apenas se o status tiver laudo válido e o Nº TIS não estiver vazio |
 | `localizarLinhaCandidatosDataBasePorId(aba, id)` | Localiza a linha de um candidato em `candidatosDataBase` |
 | `sincronizarNumTISPrincipal(aba, estrutura, linha, novoValor)` | Sincroniza Nº TIS |
 | `sincronizarObservacoesPrincipal(aba, estrutura, linha, novoValor)` | Sincroniza Observações |

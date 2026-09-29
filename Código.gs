@@ -1531,6 +1531,18 @@ var MAPA_LAUDO_POR_STATUS = {
 };
 
 /**
+ * "finalizado" (candidatosDataBase, coluna F) só deve ficar marcado quando
+ * o Status gravado corresponder a um laudo válido (existe em
+ * MAPA_LAUDO_POR_STATUS) E a coluna "Nº TIS" da tabela "principal" já
+ * estiver devidamente preenchida para aquele candidato.
+ */
+function candidatoEstaFinalizado(statusValor, numTisValor) {
+  var status = String(statusValor || '').trim().toUpperCase();
+  if (!MAPA_LAUDO_POR_STATUS[status]) return false;
+  return String(numTisValor || '').trim() !== '';
+}
+
+/**
  * Cria (se ainda não existir) o gatilho onEdit INSTALÁVEL responsável pela
  * sincronização Status/Nº TIS da tabela "principal" com "candidatosDataBase".
  * Precisa ser instalável (não simples) porque exibe alertas (SpreadsheetApp.getUi()),
@@ -1609,6 +1621,10 @@ function localizarLinhaCandidatosDataBasePorId(aba, id) {
  * Sincroniza a edição da coluna "Nº TIS" da tabela "principal" para a
  * coluna "nº TIS" (coluna J) de "candidatosDataBase". Uma célula limpa
  * também limpa o valor em "candidatosDataBase".
+ *
+ * Também recalcula "finalizado" (coluna F): a caixa só permanece/passa a
+ * marcada se, além de já existir um Status com laudo válido gravado, o
+ * Nº TIS agora informado não estiver vazio (ver candidatoEstaFinalizado).
  */
 function sincronizarNumTISPrincipal(aba, estrutura, linha, novoValor) {
   var id = String(aba.getRange(linha, estrutura.colMatricula).getValue()).trim();
@@ -1621,6 +1637,9 @@ function sincronizarNumTISPrincipal(aba, estrutura, linha, novoValor) {
   if (linhaDataBase === -1) return;
 
   abaDataBase.getRange(linhaDataBase, 10).setValue(novoValor || '');
+
+  var statusAtual = abaDataBase.getRange(linhaDataBase, 4).getValue();
+  abaDataBase.getRange(linhaDataBase, 6).setValue(candidatoEstaFinalizado(statusAtual, novoValor));
 }
 
 /**
@@ -1649,8 +1668,13 @@ function sincronizarObservacoesPrincipal(aba, estrutura, linha, novoValor) {
  *   em "candidatosDataBase", sem marcar "finalizado" nem gravar "Laudo"
  *   ou "dataLaudo" (ficam limpos, igual ao caso de célula vazia).
  * - Se um status válido (APTO/INAPTO/FALTOU/INSUF DOCUMENTAL) for
- *   selecionado, grava "status"/"finalizado"/"dataLaudo"/"Laudo" em
- *   "candidatosDataBase" e a "Data laudo" de hoje em "Principal".
+ *   selecionado, grava "status"/"dataLaudo"/"Laudo" em
+ *   "candidatosDataBase" e a "Data laudo" de hoje em "Principal";
+ *   "finalizado" só é marcado como VERDADEIRO se a coluna "Nº TIS" da
+ *   tabela "principal" já estiver preenchida para aquele candidato
+ *   (ver candidatoEstaFinalizado) — do contrário fica desmarcado até o
+ *   Nº TIS ser informado (o que recalcula "finalizado" via
+ *   sincronizarNumTISPrincipal).
  * - Para INAPTO, confirma com o usuário antes de gravar (revertendo a
  *   célula ao valor anterior se recusado) e, em seguida, oferece gerar o
  *   Termo de Cientificação de Recurso.
@@ -1709,8 +1733,10 @@ function processarEdicaoStatusPrincipal(aba, estrutura, linha, e) {
     }
   }
 
+  var numTisAtual = estrutura.colNumTIS !== -1 ? aba.getRange(linha, estrutura.colNumTIS).getValue() : '';
+
   abaDataBase.getRange(linhaDataBase, 4).setValue(novoValor);
-  abaDataBase.getRange(linhaDataBase, 6).setValue(true);
+  abaDataBase.getRange(linhaDataBase, 6).setValue(candidatoEstaFinalizado(novoValor, numTisAtual));
   abaDataBase.getRange(linhaDataBase, 8).setValue(hoje);
   abaDataBase.getRange(linhaDataBase, 9).setValue(laudoTexto);
   if (estrutura.colDataLaudo !== -1) aba.getRange(linha, estrutura.colDataLaudo).setValue(hoje);
